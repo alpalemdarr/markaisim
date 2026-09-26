@@ -696,7 +696,7 @@ export default function HomePage() {
             </div>
 
             {/* Voting Actions */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+            <div className="voting-banner-actions">
               <button
                 id="open-ballot-btn"
                 onClick={openVoteModal}
@@ -780,7 +780,7 @@ export default function HomePage() {
             </button>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <div className="nav-tabs-actions">
             <button
               id="add-sug-btn"
               onClick={() => setShowAddModal(true)}
@@ -818,18 +818,10 @@ export default function HomePage() {
                 />
               </div>
 
-              <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+              <div className="filter-tags-scroll">
                 <button
                   onClick={() => setSelectedTag('all')}
-                  style={{
-                    padding: '0.35rem 0.65rem',
-                    borderRadius: 'var(--radius-xs)',
-                    border: '1px solid var(--border-default)',
-                    background: selectedTag === 'all' ? 'var(--bg-surface-elevated)' : 'transparent',
-                    color: selectedTag === 'all' ? '#FFFFFF' : 'var(--text-muted)',
-                    fontSize: '0.75rem',
-                    cursor: 'pointer',
-                  }}
+                  className={`filter-chip-btn ${selectedTag === 'all' ? 'active' : ''}`}
                 >
                   Tümü ({suggestions.length})
                 </button>
@@ -837,15 +829,7 @@ export default function HomePage() {
                   <button
                     key={t}
                     onClick={() => setSelectedTag(t)}
-                    style={{
-                      padding: '0.35rem 0.65rem',
-                      borderRadius: 'var(--radius-xs)',
-                      border: '1px solid var(--border-default)',
-                      background: selectedTag === t ? 'var(--bg-surface-elevated)' : 'transparent',
-                      color: selectedTag === t ? '#FFFFFF' : 'var(--text-muted)',
-                      fontSize: '0.75rem',
-                      cursor: 'pointer',
-                    }}
+                    className={`filter-chip-btn ${selectedTag === t ? 'active' : ''}`}
                   >
                     #{t}
                   </button>
@@ -1044,20 +1028,7 @@ export default function HomePage() {
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                   {leaderboard.map((item) => (
-                    <div
-                      key={item.suggestion.id}
-                      style={{
-                        background: 'var(--bg-surface)',
-                        border: '1px solid var(--border-default)',
-                        borderRadius: 'var(--radius-sm)',
-                        padding: '0.85rem 1.15rem',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        gap: '1rem',
-                        flexWrap: 'wrap',
-                      }}
-                    >
+                    <div key={item.suggestion.id} className="leaderboard-row-item">
                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
                         <span
                           style={{
@@ -1065,23 +1036,24 @@ export default function HomePage() {
                             fontSize: '0.85rem',
                             color: item.rank === 1 ? 'var(--gold)' : 'var(--text-muted)',
                             width: '20px',
+                            flexShrink: 0,
                           }}
                         >
                           #{item.rank}
                         </span>
                         <div>
-                          <div style={{ fontWeight: 700, fontSize: '0.95rem', color: '#FFFFFF' }}>
+                          <div style={{ fontWeight: 700, fontSize: '0.95rem', color: '#FFFFFF', wordBreak: 'break-word' }}>
                             {item.suggestion.name}
                           </div>
-                          <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                          <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', wordBreak: 'break-word' }}>
                             {item.suggestion.meaning.substring(0, 80)}...
                           </div>
                         </div>
                       </div>
 
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
+                      <div className="leaderboard-right-meta">
                         {/* Break down per voter */}
-                        <div style={{ display: 'flex', gap: '0.35rem' }}>
+                        <div className="leaderboard-voters-wrap">
                           {item.voters.map((v) => (
                             <span
                               key={v.user_id}
@@ -1092,6 +1064,7 @@ export default function HomePage() {
                                 padding: '0.15rem 0.45rem',
                                 borderRadius: 'var(--radius-xs)',
                                 color: 'var(--text-secondary)',
+                                whiteSpace: 'nowrap',
                               }}
                               title={v.note ? `${v.user_name} notu: "${v.note}"` : `${v.user_name} puanı: ${v.score}`}
                             >
@@ -1100,7 +1073,7 @@ export default function HomePage() {
                           ))}
                         </div>
 
-                        <div style={{ textAlign: 'right', minWidth: '70px' }}>
+                        <div style={{ textAlign: 'right', minWidth: '70px', flexShrink: 0 }}>
                           <div style={{ fontWeight: 700, fontSize: '1rem', color: '#FFFFFF' }}>
                             {item.total_score} Puan
                           </div>
