@@ -4,29 +4,35 @@ import fs from 'fs';
 import path from 'path';
 import { User, Suggestion, VotingSession, Vote, Comment, LeaderboardItem } from './types';
 
-// Initial 3 users as specified in the prompt: "3 kullanıcı olacak hepsi aynı özelliklere sahip olacak"
+// 3 Kullanıcı: Gökhan, Alperen, Çağatay (Şifre: 12345678)
 const DEFAULT_USERS: User[] = [
   {
-    id: 'user_1',
-    name: 'Kullanıcı 1',
-    avatar: '⚡',
-    color: '#6366F1', // Indigo
+    id: 'user_gokhan',
+    name: 'Gökhan',
+    username: 'gökhan',
+    password: '12345678',
+    avatar: 'G',
+    color: '#3B82F6',
     role: 'member',
     created_at: new Date().toISOString(),
   },
   {
-    id: 'user_2',
-    name: 'Kullanıcı 2',
-    avatar: '💎',
-    color: '#EC4899', // Pink
+    id: 'user_alperen',
+    name: 'Alperen',
+    username: 'alperen',
+    password: '12345678',
+    avatar: 'A',
+    color: '#10B981',
     role: 'member',
     created_at: new Date().toISOString(),
   },
   {
-    id: 'user_3',
-    name: 'Kullanıcı 3',
-    avatar: '🚀',
-    color: '#10B981', // Emerald
+    id: 'user_cagatay',
+    name: 'Çağatay',
+    username: 'çağatay',
+    password: '12345678',
+    avatar: 'Ç',
+    color: '#F59E0B',
     role: 'member',
     created_at: new Date().toISOString(),
   },
@@ -35,37 +41,37 @@ const DEFAULT_USERS: User[] = [
 const INITIAL_SUGGESTIONS: Suggestion[] = [
   {
     id: 'sug_1',
-    name: 'Lumivex',
-    meaning: 'Latince "Lumen" (ışık, aydınlık) ve "Vex" (zirve, öncü) kelimelerinin birleşimi. Kullanıcılara yol gösteren, modern ve teknolojik bir kimlik çağrıştırır.',
-    tagline: 'Geleceği aydınlatan yeni nesil platform.',
+    name: 'Vera',
+    meaning: 'Latince "gerçek, hakiki, doğru" anlamına gelen kökten gelir. Şeffaf, dürüst ve sağlam temelli bir marka duruşunu temsil eder.',
+    tagline: 'Doğru ve sağlam temeller üzerinde.',
     domain_status: 'available',
-    tags: ['Modern', 'Teknoloji', 'Global'],
-    created_by_id: 'user_1',
-    created_by_name: 'Kullanıcı 1',
+    tags: ['Kısa', 'Evrensel', 'Minimal'],
+    created_by_id: 'user_gokhan',
+    created_by_name: 'Gökhan',
     status: 'active',
     created_at: new Date(Date.now() - 3600000 * 24).toISOString(),
   },
   {
     id: 'sug_2',
-    name: 'PusulaSoft',
-    meaning: 'Türkçe "Pusula" kavramından türetilmiştir. Kullanıcılarına doğru rotayı çizen, güvenilir ve sağlam bir yol gösterici vizyonunu temsil eder.',
-    tagline: 'Doğru yönde, güvenle ilerleyin.',
+    name: 'Pusula',
+    meaning: 'Yön ve strateji tayin eden, karmaşık süreçlerde doğru rotayı çizen rehberlik vizyonunu yansıtır.',
+    tagline: 'Rotanızı güvenle çizin.',
     domain_status: 'unknown',
-    tags: ['Türkçe', 'Güvenilir', 'Kurumsal'],
-    created_by_id: 'user_2',
-    created_by_name: 'Kullanıcı 2',
+    tags: ['Türkçe', 'Strateji', 'Güvenilir'],
+    created_by_id: 'user_alperen',
+    created_by_name: 'Alperen',
     status: 'active',
     created_at: new Date(Date.now() - 3600000 * 12).toISOString(),
   },
   {
     id: 'sug_3',
-    name: 'NovaForge',
-    meaning: 'Nova (parlayan yeni yıldız) ve Forge (üretmek, şekil vermek) bileşimi. Yüksek enerjiyle yeni fikirler inşa eden dinamik bir ekibi anlatır.',
-    tagline: 'Yıldız gibi parlayan fikirlerin atölyesi.',
+    name: 'Kolektif',
+    meaning: 'Birlikte üretme, ortak akıl ve paylaşılan vizyonun gücünü simgeler. Ortaklık kültürünü en iyi anlatan kavram.',
+    tagline: 'Ortak aklın ve üretimin gücü.',
     domain_status: 'available',
-    tags: ['Yaratıcı', 'İnovasyon', 'Güçlü'],
-    created_by_id: 'user_3',
-    created_by_name: 'Kullanıcı 3',
+    tags: ['İşbirliği', 'Güçlü', 'Kurumsal'],
+    created_by_id: 'user_cagatay',
+    created_by_name: 'Çağatay',
     status: 'active',
     created_at: new Date(Date.now() - 3600000 * 4).toISOString(),
   },
@@ -127,11 +133,16 @@ async function ensurePgSchema() {
       CREATE TABLE IF NOT EXISTS users (
         id VARCHAR(50) PRIMARY KEY,
         name VARCHAR(100) NOT NULL,
+        username VARCHAR(50),
+        password VARCHAR(100),
         avatar VARCHAR(50) NOT NULL,
         color VARCHAR(50) NOT NULL,
         role VARCHAR(20) DEFAULT 'member',
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       );
+
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS username VARCHAR(50);
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS password VARCHAR(100);
 
       CREATE TABLE IF NOT EXISTS suggestions (
         id VARCHAR(50) PRIMARY KEY,
@@ -182,15 +193,17 @@ async function ensurePgSchema() {
       );
     `);
 
-    // Seed default users if empty
-    const usersCountRes = await queryPg('SELECT COUNT(*) FROM users');
-    if (parseInt(usersCountRes.rows[0].count, 10) === 0) {
-      for (const u of DEFAULT_USERS) {
-        await queryPg(
-          'INSERT INTO users (id, name, avatar, color, role, created_at) VALUES ($1, $2, $3, $4, $5, $6)',
-          [u.id, u.name, u.avatar, u.color, u.role, u.created_at]
-        );
-      }
+    // Ensure 3 default users (Gökhan, Alperen, Çağatay) exist with credentials
+    for (const u of DEFAULT_USERS) {
+      await queryPg(
+        `INSERT INTO users (id, name, username, password, avatar, color, role, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         ON CONFLICT (id) DO UPDATE SET
+           name = EXCLUDED.name,
+           username = EXCLUDED.username,
+           password = EXCLUDED.password`,
+        [u.id, u.name, u.username, u.password || '12345678', u.avatar, u.color, u.role, u.created_at]
+      );
     }
 
     // Seed default suggestions if empty
@@ -305,6 +318,7 @@ export const db = {
         return res.rows.map((r: any) => ({
           id: r.id,
           name: r.name,
+          username: r.username || r.name.toLowerCase(),
           avatar: r.avatar,
           color: r.color,
           role: r.role || 'member',
@@ -314,7 +328,59 @@ export const db = {
     }
 
     const local = getLocalData();
-    return local.users;
+    return local.users.map(({ password, ...u }) => u);
+  },
+
+  async authenticateUser(usernameInput: string, passwordInput: string): Promise<User | null> {
+    const normalize = (s: string) =>
+      s
+        .trim()
+        .toLowerCase()
+        .replace(/ğ/g, 'g')
+        .replace(/ü/g, 'u')
+        .replace(/ş/g, 's')
+        .replace(/ı/g, 'i')
+        .replace(/ö/g, 'o')
+        .replace(/ç/g, 'c');
+
+    const cleanInput = normalize(usernameInput);
+    const cleanPass = passwordInput.trim();
+
+    if (isPostgresConfigured()) {
+      await ensurePgSchema();
+      const res = await queryPg('SELECT * FROM users');
+      const found = res.rows.find((r: any) => {
+        const uNorm = normalize(r.username || r.name || '');
+        const nNorm = normalize(r.name || '');
+        return (uNorm === cleanInput || nNorm === cleanInput) && r.password === cleanPass;
+      });
+
+      if (found) {
+        return {
+          id: found.id,
+          name: found.name,
+          username: found.username || found.name.toLowerCase(),
+          avatar: found.avatar,
+          color: found.color,
+          role: found.role || 'member',
+          created_at: new Date(found.created_at).toISOString(),
+        };
+      }
+      return null;
+    }
+
+    const local = getLocalData();
+    const found = local.users.find((u) => {
+      const uNorm = normalize(u.username || u.name || '');
+      const nNorm = normalize(u.name || '');
+      return (uNorm === cleanInput || nNorm === cleanInput) && u.password === cleanPass;
+    });
+
+    if (found) {
+      const { password, ...safeUser } = found;
+      return safeUser as User;
+    }
+    return null;
   },
 
   async updateUser(id: string, updates: Partial<User>): Promise<User | null> {
@@ -335,6 +401,7 @@ export const db = {
       return {
         id: r.id,
         name: r.name,
+        username: r.username || r.name.toLowerCase(),
         avatar: r.avatar,
         color: r.color,
         role: r.role || 'member',

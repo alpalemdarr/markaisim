@@ -3,37 +3,41 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import confetti from 'canvas-confetti';
 import {
-  Sparkles,
   Plus,
   Vote as VoteIcon,
   Trophy,
-  Users,
   Search,
   CheckCircle2,
   Clock,
-  ExternalLink,
   MessageSquare,
   Trash2,
   X,
   HelpCircle,
   Database,
-  ArrowRight,
-  Edit3,
   Star,
   Globe,
-  Share2,
   RefreshCw,
-  Award,
+  LogOut,
+  Lock,
+  User as UserIcon,
+  ShieldCheck,
+  ChevronRight,
 } from 'lucide-react';
 import { User, Suggestion, VotingSession, LeaderboardItem, Comment } from '@/lib/types';
 
 export default function HomePage() {
-  // App State
+  // Auth State
+  const [authenticatedUser, setAuthenticatedUser] = useState<User | null>(null);
+  const [authChecking, setAuthChecking] = useState(true);
+  const [loginUsername, setLoginUsername] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
+  const [loginError, setLoginError] = useState('');
+  const [loggingIn, setLoggingIn] = useState(false);
+
+  // App Data State
   const [users, setUsers] = useState<User[]>([]);
-  const [activeUser, setActiveUser] = useState<User | null>(null);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [activeSession, setActiveSession] = useState<VotingSession | null>(null);
-  const [allSessions, setAllSessions] = useState<VotingSession[]>([]);
   const [leaderboard, setLeaderboard] = useState<LeaderboardItem[]>([]);
   const [dbStatus, setDbStatus] = useState<{
     type: string;
@@ -46,18 +50,16 @@ export default function HomePage() {
   const [activeTab, setActiveTab] = useState<'suggestions' | 'leaderboard' | 'guide'>('suggestions');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTag, setSelectedTag] = useState<string>('all');
-  const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  // Modals State
+  // Modals
   const [showAddModal, setShowAddModal] = useState(false);
   const [showStartSessionModal, setShowStartSessionModal] = useState(false);
   const [showVoteModal, setShowVoteModal] = useState(false);
-  const [showEditUserModal, setShowEditUserModal] = useState(false);
   const [showCommentsModal, setShowCommentsModal] = useState<Suggestion | null>(null);
   const [showDbGuideModal, setShowDbGuideModal] = useState(false);
 
-  // Form State: New Suggestion
+  // Form State: Add Suggestion
   const [newSugName, setNewSugName] = useState('');
   const [newSugMeaning, setNewSugMeaning] = useState('');
   const [newSugTagline, setNewSugTagline] = useState('');
@@ -65,27 +67,46 @@ export default function HomePage() {
   const [newSugDomain, setNewSugDomain] = useState<'available' | 'taken' | 'unknown'>('available');
   const [submittingSug, setSubmittingSug] = useState(false);
 
-  // Form State: New Voting Session
+  // Form State: Start Session
   const [newSessionTitle, setNewSessionTitle] = useState('1. Tur İsim Oylaması');
-  const [newSessionDesc, setNewSessionDesc] = useState('Tüm öneriler arasından en uygun projeyi seçiyoruz.');
+  const [newSessionDesc, setNewSessionDesc] = useState('Tüm isim önerilerini 1-10 puanlayarak finale kalacak ismi seçiyoruz.');
   const [submittingSession, setSubmittingSession] = useState(false);
 
-  // Form State: User Votes
-  // Map of suggestionId -> score (1-10) and note
+  // Form State: Voting Ballot
   const [ballotScores, setBallotScores] = useState<Record<string, { score: number; note: string }>>({});
   const [submittingVotes, setSubmittingVotes] = useState(false);
-
-  // Form State: User Profile Edit
-  const [editUserName, setEditUserName] = useState('');
-  const [editUserAvatar, setEditUserAvatar] = useState('');
-  const [submittingUserEdit, setSubmittingUserEdit] = useState(false);
 
   // Form State: Comments
   const [commentsList, setCommentsList] = useState<Comment[]>([]);
   const [newCommentText, setNewCommentText] = useState('');
   const [submittingComment, setSubmittingComment] = useState(false);
 
-  // Fetch initial data
+  // Check auth on load
+  const checkAuth = async () => {
+    try {
+      const res = await fetch('/api/auth/me');
+      const data = await res.json();
+      if (data.success && data.user) {
+        setAuthenticatedUser(data.user);
+      } else {
+        // Check localStorage fallback if cookie is unavailable
+        const stored = localStorage.getItem('isim_auth_user');
+        if (stored) {
+          try {
+            setAuthenticatedUser(JSON.parse(stored));
+          } catch {
+            setAuthenticatedUser(null);
+          }
+        }
+      }
+    } catch (e) {
+      console.error('Auth check error:', e);
+    } finally {
+      setAuthChecking(false);
+    }
+  };
+
+  // Fetch app data
   const fetchData = async () => {
     try {
       setRefreshing(true);
@@ -96,55 +117,83 @@ export default function HomePage() {
         fetch('/api/db-status').then((r) => r.json()),
       ]);
 
-      if (usersRes.success && usersRes.users.length > 0) {
-        setUsers(usersRes.users);
-        if (!activeUser) {
-          // Default to first user
-          setActiveUser(usersRes.users[0]);
-        } else {
-          // Update active user reference
-          const updatedActive = usersRes.users.find((u: User) => u.id === activeUser.id);
-          if (updatedActive) setActiveUser(updatedActive);
-        }
-      }
-
-      if (sugsRes.success) {
-        setSuggestions(sugsRes.suggestions);
-      }
+      if (usersRes.success) setUsers(usersRes.users);
+      if (sugsRes.success) setSuggestions(sugsRes.suggestions);
+      if (dbRes.success) setDbStatus(dbRes.status);
 
       if (sessionsRes.success) {
-        setAllSessions(sessionsRes.sessions);
         setActiveSession(sessionsRes.activeSession);
-
-        // If there is an active session, fetch its current leaderboard
         if (sessionsRes.activeSession) {
           const lbRes = await fetch(`/api/sessions/${sessionsRes.activeSession.id}`).then((r) => r.json());
-          if (lbRes.success) {
-            setLeaderboard(lbRes.leaderboard);
-          }
+          if (lbRes.success) setLeaderboard(lbRes.leaderboard);
         } else if (sessionsRes.sessions.length > 0) {
-          // Fetch last completed session's leaderboard
           const lbRes = await fetch(`/api/sessions/${sessionsRes.sessions[0].id}`).then((r) => r.json());
-          if (lbRes.success) {
-            setLeaderboard(lbRes.leaderboard);
-          }
+          if (lbRes.success) setLeaderboard(lbRes.leaderboard);
         }
-      }
-
-      if (dbRes.success) {
-        setDbStatus(dbRes.status);
       }
     } catch (err) {
       console.error('Error fetching data:', err);
     } finally {
-      setLoading(false);
       setRefreshing(false);
     }
   };
 
   useEffect(() => {
+    checkAuth();
     fetchData();
   }, []);
+
+  // Handle Login Submit
+  const handleLogin = async (e?: React.FormEvent, directUsername?: string, directPassword?: string) => {
+    if (e) e.preventDefault();
+    setLoginError('');
+    setLoggingIn(true);
+
+    const uName = directUsername || loginUsername;
+    const uPass = directPassword || loginPassword;
+
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: uName, password: uPass }),
+      });
+
+      const data = await res.json();
+      if (data.success && data.user) {
+        setAuthenticatedUser(data.user);
+        localStorage.setItem('isim_auth_user', JSON.stringify(data.user));
+        fetchData();
+      } else {
+        setLoginError(data.error || 'Giriş başarısız. Lütfen bilgilerinizi kontrol edin.');
+      }
+    } catch (err) {
+      console.error(err);
+      setLoginError('Bağlantı hatası oluştu.');
+    } finally {
+      setLoggingIn(false);
+    }
+  };
+
+  // Quick select user on Login Screen
+  const handleQuickLogin = (uname: string) => {
+    setLoginUsername(uname);
+    setLoginPassword('12345678');
+    handleLogin(undefined, uname, '12345678');
+  };
+
+  // Handle Logout
+  const handleLogout = async () => {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' });
+    } catch (e) {
+      console.error(e);
+    }
+    localStorage.removeItem('isim_auth_user');
+    setAuthenticatedUser(null);
+    setLoginUsername('');
+    setLoginPassword('');
+  };
 
   // Filtered Suggestions
   const allTags = useMemo(() => {
@@ -166,29 +215,24 @@ export default function HomePage() {
     });
   }, [suggestions, searchQuery, selectedTag]);
 
-  // Handle Confetti on Winner
+  // Handle Confetti
   const triggerConfetti = () => {
     try {
       confetti({
-        particleCount: 100,
-        spread: 70,
+        particleCount: 90,
+        spread: 60,
         origin: { y: 0.6 },
-        colors: ['#6366F1', '#EC4899', '#F59E0B', '#10B981'],
+        colors: ['#2563EB', '#10B981', '#EAB308', '#FFFFFF'],
       });
     } catch (e) {
-      console.log('Confetti trigger error:', e);
+      console.log(e);
     }
-  };
-
-  // Switch Active User
-  const handleUserSwitch = (user: User) => {
-    setActiveUser(user);
   };
 
   // Add Suggestion Submit
   const handleAddSuggestion = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!activeUser || !newSugName.trim() || !newSugMeaning.trim()) return;
+    if (!authenticatedUser || !newSugName.trim() || !newSugMeaning.trim()) return;
 
     try {
       setSubmittingSug(true);
@@ -206,8 +250,8 @@ export default function HomePage() {
           tagline: newSugTagline.trim(),
           domain_status: newSugDomain,
           tags: tagsArray,
-          created_by_id: activeUser.id,
-          created_by_name: activeUser.name,
+          created_by_id: authenticatedUser.id,
+          created_by_name: authenticatedUser.name,
         }),
       });
 
@@ -248,7 +292,7 @@ export default function HomePage() {
   // Start Voting Session
   const handleStartSession = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!activeUser || !newSessionTitle.trim()) return;
+    if (!authenticatedUser || !newSessionTitle.trim()) return;
 
     try {
       setSubmittingSession(true);
@@ -258,8 +302,8 @@ export default function HomePage() {
         body: JSON.stringify({
           title: newSessionTitle.trim(),
           description: newSessionDesc.trim(),
-          created_by_id: activeUser.id,
-          created_by_name: activeUser.name,
+          created_by_id: authenticatedUser.id,
+          created_by_name: authenticatedUser.name,
           max_score: 10,
           included_suggestion_ids: suggestions.map((s) => s.id),
         }),
@@ -283,10 +327,10 @@ export default function HomePage() {
     }
   };
 
-  // Complete / Finalize Session
+  // Complete Session
   const handleCompleteSession = async () => {
     if (!activeSession) return;
-    if (!confirm(`"${activeSession.title}" oylamasını tamamlamak ve kazananı ilan etmek istiyor musunuz?`)) return;
+    if (!confirm(`"${activeSession.title}" oylamasını tamamlamak ve sıralamayı netleştirmek istiyor musunuz?`)) return;
 
     try {
       const res = await fetch(`/api/sessions/${activeSession.id}`, {
@@ -308,22 +352,21 @@ export default function HomePage() {
     }
   };
 
-  // Prepare Ballot & Open Vote Modal
+  // Open Vote Modal
   const openVoteModal = () => {
     if (!activeSession) return;
-    // Pre-fill ballot scores if any
     const initial: Record<string, { score: number; note: string }> = {};
     suggestions.forEach((s) => {
-      initial[s.id] = ballotScores[s.id] || { score: 7, note: '' };
+      initial[s.id] = ballotScores[s.id] || { score: 8, note: '' };
     });
     setBallotScores(initial);
     setShowVoteModal(true);
   };
 
-  // Submit User Votes
+  // Submit Votes
   const handleSubmitVotes = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!activeSession || !activeUser) return;
+    if (!activeSession || !authenticatedUser) return;
 
     try {
       setSubmittingVotes(true);
@@ -338,8 +381,8 @@ export default function HomePage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           session_id: activeSession.id,
-          user_id: activeUser.id,
-          user_name: activeUser.name,
+          user_id: authenticatedUser.id,
+          user_name: authenticatedUser.name,
           votes: votesPayload,
         }),
       });
@@ -360,45 +403,7 @@ export default function HomePage() {
     }
   };
 
-  // Open Edit User Modal
-  const openEditUser = () => {
-    if (!activeUser) return;
-    setEditUserName(activeUser.name);
-    setEditUserAvatar(activeUser.avatar);
-    setShowEditUserModal(true);
-  };
-
-  // Submit User Profile Edit
-  const handleSaveUser = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!activeUser || !editUserName.trim()) return;
-
-    try {
-      setSubmittingUserEdit(true);
-      const res = await fetch('/api/users', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          id: activeUser.id,
-          name: editUserName.trim(),
-          avatar: editUserAvatar || '⚡',
-        }),
-      });
-
-      const data = await res.json();
-      if (data.success) {
-        setActiveUser(data.user);
-        setUsers(users.map((u) => (u.id === data.user.id ? data.user : u)));
-        setShowEditUserModal(false);
-      }
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setSubmittingUserEdit(false);
-    }
-  };
-
-  // Open Comments Modal
+  // Comments
   const openComments = async (sug: Suggestion) => {
     setShowCommentsModal(sug);
     try {
@@ -411,10 +416,9 @@ export default function HomePage() {
     }
   };
 
-  // Submit Comment
   const handleAddComment = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!showCommentsModal || !activeUser || !newCommentText.trim()) return;
+    if (!showCommentsModal || !authenticatedUser || !newCommentText.trim()) return;
 
     try {
       setSubmittingComment(true);
@@ -423,8 +427,8 @@ export default function HomePage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           suggestion_id: showCommentsModal.id,
-          user_id: activeUser.id,
-          user_name: activeUser.name,
+          user_id: authenticatedUser.id,
+          user_name: authenticatedUser.name,
           text: newCommentText.trim(),
         }),
       });
@@ -441,17 +445,155 @@ export default function HomePage() {
     }
   };
 
-  // Top 3 Podium Winners
+  const hasAuthenticatedUserVoted = useMemo(() => {
+    if (!activeSession || !authenticatedUser) return false;
+    return activeSession.user_voted_ids?.includes(authenticatedUser.id) || false;
+  }, [activeSession, authenticatedUser]);
+
+  // Top 3 for Podium
   const podiumTop3 = useMemo(() => {
     if (!leaderboard || leaderboard.length === 0) return [];
     return leaderboard.slice(0, 3);
   }, [leaderboard]);
 
-  const hasActiveUserVoted = useMemo(() => {
-    if (!activeSession || !activeUser) return false;
-    return activeSession.user_voted_ids?.includes(activeUser.id) || false;
-  }, [activeSession, activeUser]);
+  // Loading Screen while verifying session
+  if (authChecking) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>Yükleniyor...</div>
+      </div>
+    );
+  }
 
+  // ==========================================
+  // VIEW 1: AUTHENTICATION / LOGIN SCREEN
+  // ==========================================
+  if (!authenticatedUser) {
+    return (
+      <div className="login-screen-wrapper">
+        <div className="login-card">
+          <div className="login-header">
+            <div className="login-logo">IP</div>
+            <h1 className="login-title">Proje İsim Oylama</h1>
+            <p className="login-subtitle">
+              Yeni proje ismi belirleme ve oylama platformu
+            </p>
+          </div>
+
+          {/* Quick Select for the 3 partners */}
+          <div className="quick-users-label">Hızlı Kullanıcı Seçimi (3 Ortak)</div>
+          <div className="quick-users-grid">
+            <button
+              type="button"
+              id="quick-login-gokhan"
+              onClick={() => handleQuickLogin('gökhan')}
+              className={`quick-user-btn ${loginUsername.toLowerCase() === 'gökhan' ? 'active' : ''}`}
+            >
+              <div className="quick-user-avatar" style={{ background: '#2563EB' }}>G</div>
+              <span style={{ fontSize: '0.8rem', fontWeight: 600 }}>Gökhan</span>
+            </button>
+
+            <button
+              type="button"
+              id="quick-login-alperen"
+              onClick={() => handleQuickLogin('alperen')}
+              className={`quick-user-btn ${loginUsername.toLowerCase() === 'alperen' ? 'active' : ''}`}
+            >
+              <div className="quick-user-avatar" style={{ background: '#10B981' }}>A</div>
+              <span style={{ fontSize: '0.8rem', fontWeight: 600 }}>Alperen</span>
+            </button>
+
+            <button
+              type="button"
+              id="quick-login-cagatay"
+              onClick={() => handleQuickLogin('çağatay')}
+              className={`quick-user-btn ${loginUsername.toLowerCase() === 'çağatay' ? 'active' : ''}`}
+            >
+              <div className="quick-user-avatar" style={{ background: '#D97706' }}>Ç</div>
+              <span style={{ fontSize: '0.8rem', fontWeight: 600 }}>Çağatay</span>
+            </button>
+          </div>
+
+          {loginError && (
+            <div
+              style={{
+                background: 'rgba(239, 68, 68, 0.1)',
+                border: '1px solid rgba(239, 68, 68, 0.25)',
+                color: '#F87171',
+                padding: '0.65rem 0.85rem',
+                borderRadius: 'var(--radius-sm)',
+                fontSize: '0.8rem',
+                marginBottom: '1rem',
+              }}
+            >
+              {loginError}
+            </div>
+          )}
+
+          {/* Standard Login Form */}
+          <form onSubmit={handleLogin}>
+            <div className="field-group">
+              <label className="field-label" htmlFor="username-input">
+                Kullanıcı Adı
+              </label>
+              <input
+                id="username-input"
+                type="text"
+                required
+                placeholder="gökhan, alperen veya çağatay"
+                value={loginUsername}
+                onChange={(e) => setLoginUsername(e.target.value)}
+                className="field-input"
+                autoFocus
+              />
+            </div>
+
+            <div className="field-group" style={{ marginBottom: '1.5rem' }}>
+              <label className="field-label" htmlFor="password-input">
+                Şifre
+              </label>
+              <input
+                id="password-input"
+                type="password"
+                required
+                placeholder="12345678"
+                value={loginPassword}
+                onChange={(e) => setLoginPassword(e.target.value)}
+                className="field-input"
+              />
+            </div>
+
+            <button
+              id="login-submit-btn"
+              type="submit"
+              disabled={loggingIn}
+              className="btn btn-primary"
+              style={{ width: '100%', padding: '0.75rem', fontSize: '0.9rem' }}
+            >
+              {loggingIn ? 'Giriş Yapılıyor...' : 'Giriş Yap'}
+            </button>
+          </form>
+
+          <div
+            style={{
+              marginTop: '1.5rem',
+              paddingTop: '1.25rem',
+              borderTop: '1px solid var(--border-subtle)',
+              fontSize: '0.75rem',
+              color: 'var(--text-dim)',
+              textAlign: 'center',
+            }}
+          >
+            3 ortak da eşit yetkilerle isim önerebilir ve oylama başlatabilir.
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ==========================================
+  // VIEW 2: AUTHENTICATED MAIN APPLICATION
+  // ==========================================
   return (
     <div className="app-wrapper">
       {/* Header */}
@@ -459,71 +601,45 @@ export default function HomePage() {
         <div className="header-container">
           {/* Brand */}
           <div className="brand-section">
-            <div className="brand-icon">✨</div>
-            <div className="brand-info">
-              <h1>İsimBulucu</h1>
-              <p>Yeni Proje İsim Önerisi & Oylama</p>
+            <div className="brand-badge">IP</div>
+            <div>
+              <h1 className="brand-title">İsim Portalı</h1>
+              <p className="brand-subtitle">Yeni Proje İsim Önerileri & Oylama</p>
             </div>
           </div>
 
-          {/* 3-User Switcher: Equal permissions */}
-          <div className="user-switcher-container" id="user-switcher">
-            <span className="user-pill-label">3 Ortak Kullanıcı</span>
-            {users.map((u) => {
-              const isActive = activeUser?.id === u.id;
-              return (
-                <button
-                  key={u.id}
-                  id={`switch-user-${u.id}`}
-                  onClick={() => handleUserSwitch(u)}
-                  className={`user-pill-btn ${isActive ? 'active' : ''}`}
-                  title={`${u.name} olarak işlem yap`}
-                >
-                  <span className="user-pill-avatar">{u.avatar}</span>
-                  <span>{u.name}</span>
-                </button>
-              );
-            })}
-            <button
-              id="edit-profile-btn"
-              onClick={openEditUser}
-              className="btn btn-outline btn-sm"
-              style={{ padding: '0.35rem 0.55rem', borderRadius: '999px', border: 'none' }}
-              title="Profil İsmini Değiştir"
-            >
-              <Edit3 size={14} />
-            </button>
-          </div>
-
-          {/* Header Actions */}
-          <div className="header-actions">
-            {/* Database status pill */}
+          {/* User Session & Header Actions */}
+          <div className="user-session-bar">
+            {/* Database indicator */}
             <button
               id="db-status-btn"
               onClick={() => setShowDbGuideModal(true)}
               className="btn btn-outline btn-sm"
-              style={{ fontSize: '0.75rem', gap: '0.4rem' }}
+              title="Veritabanı Durumu"
             >
-              <Database size={13} color={dbStatus?.type === 'postgres' ? '#10B981' : '#F59E0B'} />
-              <span>{dbStatus?.type === 'postgres' ? 'Vercel Postgres' : 'Yerel Veritabanı'}</span>
+              <Database size={13} color={dbStatus?.type === 'postgres' ? '#10B981' : '#EAB308'} />
+              <span>{dbStatus?.type === 'postgres' ? 'Postgres' : 'Yerel DB'}</span>
             </button>
 
-            <button
-              id="add-suggestion-top-btn"
-              onClick={() => setShowAddModal(true)}
-              className="btn btn-gradient btn-sm"
-            >
-              <Plus size={16} />
-              <span>İsim Öner</span>
-            </button>
+            {/* Authenticated user chip */}
+            <div className="current-user-chip" id="user-profile-chip">
+              <div
+                className="user-avatar-circle"
+                style={{ background: authenticatedUser.color || '#2563EB' }}
+              >
+                {authenticatedUser.avatar || authenticatedUser.name.charAt(0)}
+              </div>
+              <span className="user-display-name">{authenticatedUser.name}</span>
+            </div>
 
             <button
-              id="start-voting-top-btn"
-              onClick={() => setShowStartSessionModal(true)}
-              className="btn btn-primary btn-sm"
+              id="logout-btn"
+              onClick={handleLogout}
+              className="btn btn-outline btn-sm"
+              title="Çıkış Yap"
             >
-              <VoteIcon size={16} />
-              <span>Oylama Başlat</span>
+              <LogOut size={13} />
+              <span>Çıkış</span>
             </button>
           </div>
         </div>
@@ -531,79 +647,83 @@ export default function HomePage() {
 
       {/* Main Container */}
       <main className="main-container">
-        {/* Active Voting Hero Banner */}
+        {/* Active Voting Banner (Clean & Non-cheesy) */}
         {activeSession ? (
-          <section className="voting-hero" id="active-voting-hero">
-            <div className="voting-hero-content">
-              <div className="hero-left">
-                <div className="live-badge">
-                  <span className="live-dot"></span>
-                  CANLI OYLAMA DEVAM EDİYOR
-                </div>
-                <h2 className="hero-title">{activeSession.title}</h2>
-                <p className="hero-description">
-                  {activeSession.description || '3 kullanıcı da puanlarını vererek en iyi proje ismini belirliyor.'}
-                  {' · '}
-                  <strong style={{ color: '#A5B4FC' }}>
-                    Başlatan: {activeSession.created_by_name}
-                  </strong>
-                </p>
+          <section className="voting-banner" id="active-voting-banner">
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.35rem' }}>
+                <span
+                  style={{
+                    fontSize: '0.68rem',
+                    fontWeight: 700,
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.06em',
+                    padding: '0.15rem 0.5rem',
+                    borderRadius: 'var(--radius-xs)',
+                    background: 'rgba(37, 99, 235, 0.15)',
+                    color: '#93C5FD',
+                    border: '1px solid rgba(37, 99, 235, 0.3)',
+                  }}
+                >
+                  Aktif Oylama
+                </span>
+                <span style={{ fontSize: '0.78rem', color: 'var(--text-dim)' }}>
+                  Başlatan: {activeSession.created_by_name}
+                </span>
+              </div>
+              <h2 className="voting-banner-title">{activeSession.title}</h2>
+              <p className="voting-banner-desc">{activeSession.description}</p>
 
-                {/* Voters status tracker */}
-                <div className="hero-status-row">
-                  <div className="voters-tracker">
-                    <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: 600 }}>
-                      Katılım ({activeSession.total_participants_voted || 0}/3):
+              {/* Voter status badges for the 3 partners */}
+              <div className="voting-participants-row">
+                <span style={{ fontSize: '0.78rem', color: 'var(--text-dim)', fontWeight: 600 }}>
+                  Katılım ({activeSession.total_participants_voted || 0}/3):
+                </span>
+                {users.map((u) => {
+                  const hasVoted = activeSession.user_voted_ids?.includes(u.id);
+                  return (
+                    <span
+                      key={u.id}
+                      className={`participant-pill ${hasVoted ? 'voted' : 'pending'}`}
+                    >
+                      {hasVoted ? <CheckCircle2 size={12} /> : <Clock size={12} />}
+                      <span>{u.name}</span>
+                      <span>{hasVoted ? 'Oy Kullandı' : 'Bekleniyor'}</span>
                     </span>
-                    {users.map((u) => {
-                      const hasVoted = activeSession.user_voted_ids?.includes(u.id);
-                      return (
-                        <span
-                          key={u.id}
-                          className={`voter-status-badge ${hasVoted ? 'voted' : 'pending'}`}
-                        >
-                          {hasVoted ? <CheckCircle2 size={13} /> : <Clock size={13} />}
-                          <span>{u.avatar} {u.name}</span>
-                          <span>{hasVoted ? 'Oy Verdi' : 'Bekliyor'}</span>
-                        </span>
-                      );
-                    })}
-                  </div>
-                </div>
+                  );
+                })}
               </div>
+            </div>
 
-              {/* Action buttons */}
-              <div className="hero-right-actions">
-                <button
-                  id="vote-now-btn"
-                  onClick={openVoteModal}
-                  className="btn btn-gradient"
-                  style={{ padding: '0.85rem 1.6rem', fontSize: '1rem' }}
-                >
-                  <Star size={18} />
-                  <span>{hasActiveUserVoted ? 'Oylarımı Güncelle' : 'Hemen Oyumu Ver'}</span>
-                </button>
+            {/* Voting Actions */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+              <button
+                id="open-ballot-btn"
+                onClick={openVoteModal}
+                className="btn btn-primary"
+              >
+                <Star size={15} />
+                <span>{hasAuthenticatedUserVoted ? 'Oylarımı Düzenle' : 'Oyumu Kullan (1-10 Puan)'}</span>
+              </button>
 
-                <button
-                  id="complete-session-btn"
-                  onClick={handleCompleteSession}
-                  className="btn btn-secondary"
-                  title="Tüm 3 kullanıcı oy kullandıktan sonra kazananı ilan edebilirsiniz"
-                >
-                  <Trophy size={16} />
-                  <span>Oylamayı Sonlandır</span>
-                </button>
-              </div>
+              <button
+                id="finish-session-btn"
+                onClick={handleCompleteSession}
+                className="btn btn-secondary"
+                title="Oylamayı tamamlar ve kazananı netleştirir"
+              >
+                <span>Oylamayı Tamamla</span>
+              </button>
             </div>
           </section>
         ) : (
           <div
             style={{
-              background: 'rgba(14, 19, 31, 0.5)',
-              border: '1px dashed var(--border-subtle)',
-              borderRadius: 'var(--radius-lg)',
-              padding: '1.25rem 1.75rem',
-              marginBottom: '2rem',
+              background: 'var(--bg-surface)',
+              border: '1px solid var(--border-default)',
+              borderRadius: 'var(--radius-md)',
+              padding: '1.15rem 1.5rem',
+              marginBottom: '1.75rem',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
@@ -611,188 +731,175 @@ export default function HomePage() {
               flexWrap: 'wrap',
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
-              <div
-                style={{
-                  width: '38px',
-                  height: '38px',
-                  borderRadius: '50%',
-                  background: 'rgba(99, 102, 241, 0.15)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: 'var(--primary-light)',
-                }}
-              >
-                <VoteIcon size={18} />
+            <div>
+              <div style={{ fontSize: '0.9rem', fontWeight: 600, color: '#FFFFFF' }}>
+                Şu anda aktif bir oylama turu yok
               </div>
-              <div>
-                <h4 style={{ fontSize: '0.95rem', fontWeight: 700, color: '#FFFFFF' }}>
-                  Şu an aktif bir oylama oturumu yok
-                </h4>
-                <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                  3 kullanıcıdan herhangi biri yeni bir oylama başlatabilir ve puanlama yapabilir.
-                </p>
+              <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                3 ortaktan herhangi biri yeni bir tur başlatarak puanlamayı açabilir.
               </div>
             </div>
 
             <button
-              id="start-session-inline-btn"
+              id="start-voting-banner-btn"
               onClick={() => setShowStartSessionModal(true)}
-              className="btn btn-primary btn-sm"
+              className="btn btn-secondary btn-sm"
             >
               <VoteIcon size={14} />
-              <span>Yeni Oylama Başlat</span>
+              <span>Oylama Başlat</span>
             </button>
           </div>
         )}
 
-        {/* Tabs Bar */}
-        <div className="tabs-bar">
-          <div className="tabs-nav">
+        {/* Navigation Tabs */}
+        <div className="nav-tabs">
+          <div className="nav-tabs-left">
             <button
-              id="tab-suggestions-btn"
+              id="tab-suggestions"
               onClick={() => setActiveTab('suggestions')}
-              className={`tab-btn ${activeTab === 'suggestions' ? 'active' : ''}`}
+              className={`nav-tab-btn ${activeTab === 'suggestions' ? 'active' : ''}`}
             >
-              <Sparkles size={16} />
-              <span>Tüm İsim Önerileri</span>
-              <span className="tab-count-badge">{suggestions.length}</span>
+              <span>İsim Önerileri</span>
+              <span className="counter-badge">{suggestions.length}</span>
             </button>
 
             <button
-              id="tab-leaderboard-btn"
+              id="tab-leaderboard"
               onClick={() => setActiveTab('leaderboard')}
-              className={`tab-btn ${activeTab === 'leaderboard' ? 'active' : ''}`}
+              className={`nav-tab-btn ${activeTab === 'leaderboard' ? 'active' : ''}`}
             >
-              <Trophy size={16} />
-              <span>Oylama & Sıralama</span>
+              <span>Sonuçlar & Sıralama</span>
             </button>
 
             <button
-              id="tab-guide-btn"
+              id="tab-guide"
               onClick={() => setActiveTab('guide')}
-              className={`tab-btn ${activeTab === 'guide' ? 'active' : ''}`}
+              className={`nav-tab-btn ${activeTab === 'guide' ? 'active' : ''}`}
             >
-              <HelpCircle size={16} />
-              <span>Nasıl Çalışır & Vercel Rehberi</span>
+              <span>Vercel & Kurulum Rehberi</span>
             </button>
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
             <button
-              id="refresh-data-btn"
+              id="add-sug-btn"
+              onClick={() => setShowAddModal(true)}
+              className="btn btn-primary btn-sm"
+            >
+              <Plus size={14} />
+              <span>Yeni İsim Öner</span>
+            </button>
+
+            <button
+              id="refresh-btn"
               onClick={fetchData}
               disabled={refreshing}
               className="btn btn-outline btn-sm"
-              title="Verileri Yenile"
+              title="Yenile"
             >
-              <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
-              <span>{refreshing ? 'Yenileniyor...' : 'Yenile'}</span>
+              <RefreshCw size={13} className={refreshing ? 'animate-spin' : ''} />
             </button>
           </div>
         </div>
 
-        {/* TAB 1: SUGGESTIONS GRID */}
+        {/* TAB 1: SUGGESTIONS */}
         {activeTab === 'suggestions' && (
-          <section id="suggestions-section">
-            {/* Filter and Search Bar */}
-            <div className="filter-bar">
-              <div className="search-input-box">
-                <Search size={16} className="search-icon" />
+          <section id="suggestions-tab-content">
+            <div className="search-filter-row">
+              <div className="search-box">
+                <Search size={14} className="search-icon-inside" />
                 <input
                   id="search-input"
                   type="text"
-                  placeholder="İsim, anlam veya öneren kullanıcı ara..."
+                  placeholder="İsim, anlam veya öneren kişi..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="search-input"
                 />
               </div>
 
-              <div className="filter-pills">
+              <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
                 <button
-                  id="filter-all-btn"
                   onClick={() => setSelectedTag('all')}
-                  className={`filter-pill ${selectedTag === 'all' ? 'active' : ''}`}
+                  style={{
+                    padding: '0.35rem 0.65rem',
+                    borderRadius: 'var(--radius-xs)',
+                    border: '1px solid var(--border-default)',
+                    background: selectedTag === 'all' ? 'var(--bg-surface-elevated)' : 'transparent',
+                    color: selectedTag === 'all' ? '#FFFFFF' : 'var(--text-muted)',
+                    fontSize: '0.75rem',
+                    cursor: 'pointer',
+                  }}
                 >
                   Tümü ({suggestions.length})
                 </button>
-                {allTags.map((tag) => (
+                {allTags.map((t) => (
                   <button
-                    key={tag}
-                    id={`filter-tag-${tag}`}
-                    onClick={() => setSelectedTag(tag)}
-                    className={`filter-pill ${selectedTag === tag ? 'active' : ''}`}
+                    key={t}
+                    onClick={() => setSelectedTag(t)}
+                    style={{
+                      padding: '0.35rem 0.65rem',
+                      borderRadius: 'var(--radius-xs)',
+                      border: '1px solid var(--border-default)',
+                      background: selectedTag === t ? 'var(--bg-surface-elevated)' : 'transparent',
+                      color: selectedTag === t ? '#FFFFFF' : 'var(--text-muted)',
+                      fontSize: '0.75rem',
+                      cursor: 'pointer',
+                    }}
                   >
-                    #{tag}
+                    #{t}
                   </button>
                 ))}
               </div>
             </div>
 
-            {/* Suggestions Cards Grid */}
             {filteredSuggestions.length === 0 ? (
               <div
                 style={{
                   textAlign: 'center',
-                  padding: '4rem 1rem',
-                  background: 'var(--bg-card)',
-                  borderRadius: 'var(--radius-lg)',
-                  border: '1px solid var(--border-subtle)',
+                  padding: '3rem 1rem',
+                  background: 'var(--bg-surface)',
+                  borderRadius: 'var(--radius-md)',
+                  border: '1px solid var(--border-default)',
                 }}
               >
-                <div style={{ fontSize: '2.5rem', marginBottom: '1rem' }}>💡</div>
-                <h3 style={{ fontSize: '1.25rem', fontWeight: 700, marginBottom: '0.5rem' }}>
-                  Henüz aradığınız kriterde bir öneri bulunamadı.
-                </h3>
-                <p style={{ color: 'var(--text-muted)', marginBottom: '1.5rem', fontSize: '0.9rem' }}>
-                  Hemen yeni bir proje isim önerisi ve anlamını ekleyerek başlayabilirsiniz.
+                <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '1rem' }}>
+                  Kriterlere uygun öneri bulunamadı.
                 </p>
-                <button
-                  onClick={() => setShowAddModal(true)}
-                  className="btn btn-gradient"
-                >
-                  <Plus size={16} />
-                  <span>İlk İsim Önerisini Ekle</span>
+                <button onClick={() => setShowAddModal(true)} className="btn btn-primary btn-sm">
+                  Yeni İsim Ekle
                 </button>
               </div>
             ) : (
-              <div className="suggestions-grid">
+              <div className="cards-grid">
                 {filteredSuggestions.map((sug) => (
-                  <article key={sug.id} className="suggestion-card" id={`card-${sug.id}`}>
+                  <div key={sug.id} className="clean-card" id={`card-${sug.id}`}>
                     <div>
-                      {/* Card Top */}
-                      <div className="card-top">
-                        <div className="suggestion-name-box">
-                          <h3 className="suggestion-title">{sug.name}</h3>
-                          {sug.tagline && <p className="suggestion-tagline">&ldquo;{sug.tagline}&rdquo;</p>}
+                      <div className="card-header-row">
+                        <div>
+                          <h3 className="name-heading">{sug.name}</h3>
+                          {sug.tagline && <p className="tagline-text">&ldquo;{sug.tagline}&rdquo;</p>}
                         </div>
 
                         <span
-                          className={`domain-pill ${
-                            sug.domain_status === 'available' ? 'domain-available' : 'domain-unknown'
+                          className={`status-badge ${
+                            sug.domain_status === 'available' ? 'status-available' : ''
                           }`}
                         >
-                          <Globe size={11} />
                           {sug.domain_status === 'available' ? '.com Müsait' : 'Alan Adı'}
                         </span>
                       </div>
 
-                      {/* Card Meaning Box */}
-                      <div className="suggestion-meaning-box" style={{ marginTop: '1rem' }}>
-                        <span className="meaning-label">
-                          <Sparkles size={12} color="var(--primary-light)" />
-                          Ne Anlama Geliyor?
-                        </span>
-                        <p className="meaning-text">{sug.meaning}</p>
+                      {/* Meaning description */}
+                      <div className="meaning-block" style={{ marginTop: '0.85rem' }}>
+                        <div className="meaning-title">Ne Anlama Geliyor?</div>
+                        <p className="meaning-desc">{sug.meaning}</p>
                       </div>
 
-                      {/* Tags List */}
                       {sug.tags && sug.tags.length > 0 && (
-                        <div className="tags-list" style={{ marginTop: '0.9rem' }}>
+                        <div className="card-tags">
                           {sug.tags.map((t) => (
-                            <span key={t} className="tag-item">
+                            <span key={t} className="clean-tag">
                               #{t}
                             </span>
                           ))}
@@ -800,209 +907,204 @@ export default function HomePage() {
                       )}
                     </div>
 
-                    {/* Card Footer */}
-                    <div className="card-footer">
-                      <div className="creator-info">
-                        <span className="creator-avatar">👤</span>
-                        <div>
-                          <div className="creator-name">{sug.created_by_name}</div>
-                          <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)' }}>
-                            {new Date(sug.created_at).toLocaleDateString('tr-TR')}
-                          </div>
-                        </div>
+                    <div className="card-meta-bar">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+                        <UserIcon size={13} color="var(--text-dim)" />
+                        <span>{sug.created_by_name}</span>
+                        <span style={{ color: 'var(--text-dim)' }}>·</span>
+                        <span style={{ color: 'var(--text-dim)' }}>
+                          {new Date(sug.created_at).toLocaleDateString('tr-TR')}
+                        </span>
                       </div>
 
-                      <div className="card-actions">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                         <button
-                          id={`comment-btn-${sug.id}`}
                           onClick={() => openComments(sug)}
                           className="btn btn-outline btn-sm"
-                          title="Görüş / Yorum Yaz"
+                          style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}
                         >
-                          <MessageSquare size={13} />
+                          <MessageSquare size={12} />
                           <span>Yorum</span>
                         </button>
 
                         <button
-                          id={`delete-btn-${sug.id}`}
                           onClick={() => handleDeleteSuggestion(sug.id, sug.name)}
                           className="btn btn-danger btn-sm"
+                          style={{ padding: '0.25rem 0.5rem' }}
                           title="Öneriyi Sil"
                         >
-                          <Trash2 size={13} />
+                          <Trash2 size={12} />
                         </button>
                       </div>
                     </div>
-                  </article>
+                  </div>
                 ))}
               </div>
             )}
           </section>
         )}
 
-        {/* TAB 2: LEADERBOARD & VOTING RESULTS */}
+        {/* TAB 2: LEADERBOARD & RESULTS */}
         {activeTab === 'leaderboard' && (
-          <section id="leaderboard-section">
+          <section id="leaderboard-tab-content">
             {leaderboard.length === 0 ? (
               <div
                 style={{
                   textAlign: 'center',
-                  padding: '4rem 1rem',
-                  background: 'var(--bg-card)',
-                  borderRadius: 'var(--radius-lg)',
+                  padding: '3.5rem 1rem',
+                  background: 'var(--bg-surface)',
+                  borderRadius: 'var(--radius-md)',
+                  border: '1px solid var(--border-default)',
                 }}
               >
-                <Trophy size={48} color="var(--gold)" style={{ margin: '0 auto 1rem' }} />
-                <h3 style={{ fontSize: '1.3rem', fontWeight: 800, marginBottom: '0.5rem' }}>
+                <Trophy size={36} color="var(--text-dim)" style={{ margin: '0 auto 0.75rem' }} />
+                <h3 style={{ fontSize: '1.15rem', fontWeight: 700, marginBottom: '0.4rem' }}>
                   Henüz bir oylama sonucu kaydedilmedi
                 </h3>
-                <p style={{ color: 'var(--text-muted)', marginBottom: '1.5rem', maxWidth: '480px', margin: '0 auto 1.5rem' }}>
-                  Yukarıdaki &ldquo;Oylama Başlat&rdquo; butonuna basarak 3 kullanıcının katılacağı yeni bir puanlama turu başlatabilirsiniz.
+                <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: '1.25rem' }}>
+                  Üst kısımdan &ldquo;Oylama Başlat&rdquo; diyerek 3 ortağın katılacağı ilk oylama turunu başlatabilirsiniz.
                 </p>
                 <button
                   onClick={() => setShowStartSessionModal(true)}
-                  className="btn btn-gradient"
+                  className="btn btn-primary btn-sm"
                 >
-                  <VoteIcon size={16} />
-                  <span>İlk Oylama Turunu Başlat</span>
+                  Oylama Başlat
                 </button>
               </div>
             ) : (
               <div>
-                {/* Winner Podium (Top 3) */}
-                <div style={{ textAlign: 'center', marginBottom: '1rem' }}>
-                  <h2 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.8rem', fontWeight: 800, color: '#FFFFFF' }}>
-                    🏆 Oylama Liderlik Tablosu
-                  </h2>
-                  <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>
-                    {activeSession ? 'Canlı oylamada öne çıkan isimler' : 'Tamamlanan son oylama sonuçları'}
-                  </p>
+                {/* Clean Top 3 Podium */}
+                <div className="clean-podium">
+                  {/* Rank 2 */}
+                  {podiumTop3[1] && (
+                    <div className="podium-card">
+                      <div>
+                        <div className="podium-rank-tag" style={{ color: 'var(--silver)' }}>
+                          2. Sırada
+                        </div>
+                        <h4 className="podium-name-text">{podiumTop3[1].suggestion.name}</h4>
+                        <div className="podium-points">{podiumTop3[1].total_score} Puan</div>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
+                          Ortalama: {podiumTop3[1].average_score} / 10 ({podiumTop3[1].vote_count} oy)
+                        </div>
+                      </div>
+                      <p style={{ fontSize: '0.78rem', color: 'var(--text-dim)', marginTop: '0.75rem' }}>
+                        {podiumTop3[1].suggestion.meaning.substring(0, 70)}...
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Rank 1 (Leader) */}
+                  {podiumTop3[0] && (
+                    <div className="podium-card rank-1">
+                      <div>
+                        <div className="podium-rank-tag" style={{ color: 'var(--gold)' }}>
+                          ★ 1. Lider İsim ★
+                        </div>
+                        <h3 className="podium-name-text" style={{ fontSize: '1.5rem' }}>
+                          {podiumTop3[0].suggestion.name}
+                        </h3>
+                        <div className="podium-points" style={{ color: 'var(--gold)', fontSize: '1.3rem' }}>
+                          {podiumTop3[0].total_score} Puan
+                        </div>
+                        <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>
+                          Ortalama: {podiumTop3[0].average_score} / 10 ({podiumTop3[0].vote_count} oy)
+                        </div>
+                      </div>
+                      <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '0.75rem', lineHeight: 1.45 }}>
+                        {podiumTop3[0].suggestion.meaning.substring(0, 90)}...
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Rank 3 */}
+                  {podiumTop3[2] && (
+                    <div className="podium-card">
+                      <div>
+                        <div className="podium-rank-tag" style={{ color: 'var(--bronze)' }}>
+                          3. Sırada
+                        </div>
+                        <h4 className="podium-name-text">{podiumTop3[2].suggestion.name}</h4>
+                        <div className="podium-points">{podiumTop3[2].total_score} Puan</div>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
+                          Ortalama: {podiumTop3[2].average_score} / 10 ({podiumTop3[2].vote_count} oy)
+                        </div>
+                      </div>
+                      <p style={{ fontSize: '0.78rem', color: 'var(--text-dim)', marginTop: '0.75rem' }}>
+                        {podiumTop3[2].suggestion.meaning.substring(0, 70)}...
+                      </p>
+                    </div>
+                  )}
                 </div>
 
-                {podiumTop3.length > 0 && (
-                  <div className="podium-container">
-                    {/* Rank 2 (Silver) */}
-                    {podiumTop3[1] && (
-                      <div className="podium-column">
-                        <div className="podium-rank-badge">🥈</div>
-                        <div className="podium-box rank-2">
-                          <div>
-                            <span style={{ fontSize: '0.75rem', color: 'var(--silver)', fontWeight: 700, textTransform: 'uppercase' }}>
-                              2. Sırada
-                            </span>
-                            <h4 className="podium-name">{podiumTop3[1].suggestion.name}</h4>
-                            <div className="podium-score">{podiumTop3[1].total_score} Puan</div>
-                            <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                              Ortalama: {podiumTop3[1].average_score} / 10 ({podiumTop3[1].vote_count} oy)
-                            </div>
-                          </div>
-                          <p style={{ fontSize: '0.75rem', color: 'var(--text-dim)', marginTop: '0.5rem' }}>
-                            {podiumTop3[1].suggestion.meaning.substring(0, 60)}...
-                          </p>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Rank 1 (Gold - Winner) */}
-                    {podiumTop3[0] && (
-                      <div className="podium-column">
-                        <div className="podium-rank-badge">👑 🥇</div>
-                        <div className="podium-box rank-1">
-                          <div>
-                            <span style={{ fontSize: '0.8rem', color: 'var(--gold)', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                              ✨ Lider İsim ✨
-                            </span>
-                            <h3 className="podium-name" style={{ fontSize: '1.6rem', color: '#FFFFFF' }}>
-                              {podiumTop3[0].suggestion.name}
-                            </h3>
-                            <div className="podium-score" style={{ fontSize: '1.4rem' }}>
-                              {podiumTop3[0].total_score} Puan
-                            </div>
-                            <div style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
-                              Ortalama: {podiumTop3[0].average_score} / 10 ({podiumTop3[0].vote_count} oy)
-                            </div>
-                          </div>
-                          <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '0.5rem', lineHeight: 1.4 }}>
-                            {podiumTop3[0].suggestion.meaning.substring(0, 80)}...
-                          </p>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Rank 3 (Bronze) */}
-                    {podiumTop3[2] && (
-                      <div className="podium-column">
-                        <div className="podium-rank-badge">🥉</div>
-                        <div className="podium-box rank-3">
-                          <div>
-                            <span style={{ fontSize: '0.75rem', color: 'var(--bronze)', fontWeight: 700, textTransform: 'uppercase' }}>
-                              3. Sırada
-                            </span>
-                            <h4 className="podium-name">{podiumTop3[2].suggestion.name}</h4>
-                            <div className="podium-score">{podiumTop3[2].total_score} Puan</div>
-                            <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                              Ortalama: {podiumTop3[2].average_score} / 10 ({podiumTop3[2].vote_count} oy)
-                            </div>
-                          </div>
-                          <p style={{ fontSize: '0.75rem', color: 'var(--text-dim)', marginTop: '0.5rem' }}>
-                            {podiumTop3[2].suggestion.meaning.substring(0, 60)}...
-                          </p>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* Complete Leaderboard List */}
-                <h3 style={{ fontSize: '1.2rem', fontWeight: 800, marginBottom: '1rem', color: '#FFFFFF' }}>
-                  Detaylı Puan ve Kullanıcı Dökümü
+                {/* Complete Table */}
+                <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '0.75rem', color: '#FFFFFF' }}>
+                  Puan Detayları ve Ortakların Oyları
                 </h3>
-                <div className="leaderboard-list">
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                   {leaderboard.map((item) => (
-                    <div key={item.suggestion.id} className="leaderboard-row">
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                        <div className="rank-indicator">{item.rank}</div>
+                    <div
+                      key={item.suggestion.id}
+                      style={{
+                        background: 'var(--bg-surface)',
+                        border: '1px solid var(--border-default)',
+                        borderRadius: 'var(--radius-sm)',
+                        padding: '0.85rem 1.15rem',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: '1rem',
+                        flexWrap: 'wrap',
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
+                        <span
+                          style={{
+                            fontWeight: 700,
+                            fontSize: '0.85rem',
+                            color: item.rank === 1 ? 'var(--gold)' : 'var(--text-muted)',
+                            width: '20px',
+                          }}
+                        >
+                          #{item.rank}
+                        </span>
                         <div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-                            <h4 style={{ fontSize: '1.15rem', fontWeight: 800, color: '#FFFFFF' }}>
-                              {item.suggestion.name}
-                            </h4>
-                            <span style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>
-                              Öneren: {item.suggestion.created_by_name}
-                            </span>
+                          <div style={{ fontWeight: 700, fontSize: '0.95rem', color: '#FFFFFF' }}>
+                            {item.suggestion.name}
                           </div>
-                          <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '0.2rem', maxWidth: '600px' }}>
-                            {item.suggestion.meaning}
-                          </p>
+                          <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                            {item.suggestion.meaning.substring(0, 80)}...
+                          </div>
                         </div>
                       </div>
 
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem', textAlign: 'right' }}>
-                        {/* Breakdown of voters */}
-                        <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
+                        {/* Break down per voter */}
+                        <div style={{ display: 'flex', gap: '0.35rem' }}>
                           {item.voters.map((v) => (
                             <span
                               key={v.user_id}
                               style={{
-                                fontSize: '0.75rem',
-                                background: 'rgba(255,255,255,0.06)',
+                                fontSize: '0.72rem',
+                                background: 'var(--bg-surface-elevated)',
                                 border: '1px solid var(--border-subtle)',
-                                padding: '0.2rem 0.5rem',
-                                borderRadius: 'var(--radius-sm)',
+                                padding: '0.15rem 0.45rem',
+                                borderRadius: 'var(--radius-xs)',
                                 color: 'var(--text-secondary)',
                               }}
                               title={v.note ? `${v.user_name} notu: "${v.note}"` : `${v.user_name} puanı: ${v.score}`}
                             >
-                              <strong>{v.user_name.split(' ')[0]}:</strong> {v.score}★
+                              <strong>{v.user_name}:</strong> {v.score}/10
                             </span>
                           ))}
                         </div>
 
-                        <div>
-                          <div style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--gold)' }}>
+                        <div style={{ textAlign: 'right', minWidth: '70px' }}>
+                          <div style={{ fontWeight: 700, fontSize: '1rem', color: '#FFFFFF' }}>
                             {item.total_score} Puan
                           </div>
-                          <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>
+                          <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)' }}>
                             Ort: {item.average_score} ({item.vote_count} oy)
                           </div>
                         </div>
@@ -1015,112 +1117,83 @@ export default function HomePage() {
           </section>
         )}
 
-        {/* TAB 3: HOW IT WORKS & VERCEL GUIDE */}
+        {/* TAB 3: GUIDE & VERCEL */}
         {activeTab === 'guide' && (
-          <section id="guide-section">
-            <div className="db-guide-card">
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem', marginBottom: '1.25rem' }}>
-                <div
-                  style={{
-                    width: '44px',
-                    height: '44px',
-                    borderRadius: 'var(--radius-md)',
-                    background: 'rgba(99, 102, 241, 0.2)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    color: 'var(--primary-light)',
-                  }}
-                >
-                  <Users size={22} />
-                </div>
-                <div>
-                  <h3 style={{ fontSize: '1.35rem', fontWeight: 800, color: '#FFFFFF' }}>
-                    3 Kullanıcılı Eşit Yetkili Oylama Mekanizması
-                  </h3>
-                  <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                    Tüm ortaklar aynı haklara sahiptir ve tam şeffaflıkla çalışır.
-                  </p>
-                </div>
-              </div>
+          <section id="guide-tab-content">
+            <div
+              style={{
+                background: 'var(--bg-surface)',
+                border: '1px solid var(--border-default)',
+                borderRadius: 'var(--radius-md)',
+                padding: '1.75rem',
+              }}
+            >
+              <h2 style={{ fontSize: '1.25rem', fontWeight: 700, color: '#FFFFFF', marginBottom: '0.5rem' }}>
+                3 Kullanıcı & Giriş Bilgileri
+              </h2>
+              <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '1.25rem' }}>
+                Sistemde tanımlı 3 eşit ortak kullanıcı bulunmaktadır:
+              </p>
 
               <div
                 style={{
                   display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
-                  gap: '1.25rem',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                  gap: '1rem',
                   marginBottom: '2rem',
                 }}
               >
-                <div style={{ background: 'rgba(0,0,0,0.25)', padding: '1.25rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)' }}>
-                  <h4 style={{ color: '#A5B4FC', fontWeight: 700, marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                    <Plus size={16} /> 1. İsim & Anlam Girişi
-                  </h4>
-                  <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-                    3 kullanıcı da istediği an yeni bir marka/proje ismi, ne anlama geldiği ve alan adı uygunluk notlarını sisteme kaydedebilir.
-                  </p>
+                <div style={{ background: 'var(--bg-input)', border: '1px solid var(--border-subtle)', padding: '1rem', borderRadius: 'var(--radius-sm)' }}>
+                  <div style={{ fontWeight: 700, fontSize: '0.9rem', color: '#FFFFFF' }}>Gökhan</div>
+                  <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
+                    Kullanıcı Adı: <code style={{ color: '#93C5FD' }}>gökhan</code>
+                  </div>
+                  <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                    Şifre: <code style={{ color: '#93C5FD' }}>12345678</code>
+                  </div>
                 </div>
 
-                <div style={{ background: 'rgba(0,0,0,0.25)', padding: '1.25rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)' }}>
-                  <h4 style={{ color: '#F472B6', fontWeight: 700, marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                    <VoteIcon size={16} /> 2. Oylama Başlatma
-                  </h4>
-                  <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-                    Herhangi bir kullanıcı dilediği zaman &ldquo;Oylama Başlat&rdquo; diyerek aktif bir oylama oturumu açabilir.
-                  </p>
+                <div style={{ background: 'var(--bg-input)', border: '1px solid var(--border-subtle)', padding: '1rem', borderRadius: 'var(--radius-sm)' }}>
+                  <div style={{ fontWeight: 700, fontSize: '0.9rem', color: '#FFFFFF' }}>Alperen</div>
+                  <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
+                    Kullanıcı Adı: <code style={{ color: '#93C5FD' }}>alperen</code>
+                  </div>
+                  <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                    Şifre: <code style={{ color: '#93C5FD' }}>12345678</code>
+                  </div>
                 </div>
 
-                <div style={{ background: 'rgba(0,0,0,0.25)', padding: '1.25rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)' }}>
-                  <h4 style={{ color: '#34D399', fontWeight: 700, marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                    <Trophy size={16} /> 3. 1-10 Puanlama & Podyum
-                  </h4>
-                  <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-                    3 kullanıcı da her isme 1 ile 10 arasında puan verir. Puanlar otomatik toplanır ve kazanan 1., 2. ve 3. podyuma çıkarılır.
-                  </p>
+                <div style={{ background: 'var(--bg-input)', border: '1px solid var(--border-subtle)', padding: '1rem', borderRadius: 'var(--radius-sm)' }}>
+                  <div style={{ fontWeight: 700, fontSize: '0.9rem', color: '#FFFFFF' }}>Çağatay</div>
+                  <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
+                    Kullanıcı Adı: <code style={{ color: '#93C5FD' }}>çağatay</code>
+                  </div>
+                  <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                    Şifre: <code style={{ color: '#93C5FD' }}>12345678</code>
+                  </div>
                 </div>
               </div>
 
-              {/* Vercel Deployment Guide */}
-              <div style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: '1.75rem' }}>
-                <h3 style={{ fontSize: '1.25rem', fontWeight: 800, color: '#FFFFFF', marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-                  <Database size={18} color="var(--primary-light)" />
-                  Vercel&apos;de Yayına Alma ve Veritabanı (PostgreSQL) Kurulumu
+              <div style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: '1.5rem' }}>
+                <h3 style={{ fontSize: '1.05rem', fontWeight: 700, color: '#FFFFFF', marginBottom: '0.4rem' }}>
+                  Vercel & PostgreSQL Dağıtım Rehberi
                 </h3>
-                <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', marginBottom: '1rem', lineHeight: 1.6 }}>
-                  Uygulamanız Vercel serverless ortamı için özel olarak hazırlanmıştır. Tablolar otomatik olarak oluşturulur (otomatik migration).
+                <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.5, marginBottom: '0.85rem' }}>
+                  Vercel Dashboard üzerinde projenize <strong>Vercel Postgres (Neon)</strong> bağlayabilir veya harici veritabanınızı ekleyebilirsiniz:
                 </p>
-
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                  <div style={{ background: 'rgba(0,0,0,0.3)', padding: '1rem', borderRadius: 'var(--radius-md)' }}>
-                    <strong style={{ color: '#FFFFFF', fontSize: '0.9rem' }}>
-                      Adım 1: GitHub Deposunu Vercel&apos;e Bağlayın
-                    </strong>
-                    <p style={{ fontSize: '0.825rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
-                      vercel.com &gt; &ldquo;Add New Project&rdquo; &gt; GitHub deponuzu seçip Deploy&apos;a basın.
-                    </p>
-                  </div>
-
-                  <div style={{ background: 'rgba(0,0,0,0.3)', padding: '1rem', borderRadius: 'var(--radius-md)' }}>
-                    <strong style={{ color: '#FFFFFF', fontSize: '0.9rem' }}>
-                      Adım 2: Vercel Postgres veya Neon Ekleyin
-                    </strong>
-                    <p style={{ fontSize: '0.825rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
-                      Vercel Dashboard &gt; Projeniz &gt; <strong>Storage</strong> sekmesinden tek tıkla <strong>Postgres (Neon)</strong> oluşturun. Vercel otomatik olarak <code style={{ color: '#38BDF8' }}>POSTGRES_URL</code> değişkenini ekler!
-                    </p>
-                    <p style={{ fontSize: '0.825rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
-                      Veya Supabase / Neon / Railway kullanıyorsanız, <strong>Settings &gt; Environment Variables</strong> kısmına şu değişkeni ekleyin:
-                    </p>
-                    <div className="code-snippet">DATABASE_URL=&quot;postgres://username:password@ep-host.region.neon.tech/neondb?sslmode=require&quot;</div>
-                  </div>
-
-                  <div style={{ background: 'rgba(0,0,0,0.3)', padding: '1rem', borderRadius: 'var(--radius-md)' }}>
-                    <strong style={{ color: '#FFFFFF', fontSize: '0.9rem' }}>
-                      Adım 3: Sıfır Zahmetsiz Başlatma
-                    </strong>
-                    <p style={{ fontSize: '0.825rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
-                      Herhangi bir SQL komutu çalıştırmanıza gerek yoktur. İlk ziyarette sistem otomatik olarak <code style={{ color: '#38BDF8' }}>users</code>, <code style={{ color: '#38BDF8' }}>suggestions</code>, <code style={{ color: '#38BDF8' }}>voting_sessions</code> ve <code style={{ color: '#38BDF8' }}>votes</code> tablolarını oluşturur ve 3 kullanıcıyı hazır eder.
-                    </p>
-                  </div>
+                <div
+                  style={{
+                    background: 'var(--bg-input)',
+                    border: '1px solid var(--border-subtle)',
+                    padding: '0.75rem 1rem',
+                    borderRadius: 'var(--radius-sm)',
+                    fontFamily: 'monospace',
+                    fontSize: '0.8rem',
+                    color: '#93C5FD',
+                    overflowX: 'auto',
+                  }}
+                >
+                  DATABASE_URL=&quot;postgres://kullanici:sifre@host:port/veritabani?sslmode=require&quot;
                 </div>
               </div>
             </div>
@@ -1128,119 +1201,100 @@ export default function HomePage() {
         )}
       </main>
 
-      {/* MODAL 1: ADD NEW SUGGESTION */}
+      {/* MODAL 1: ADD SUGGESTION */}
       {showAddModal && (
-        <div className="modal-overlay" id="add-suggestion-modal">
-          <div className="modal-dialog">
-            <div className="modal-header">
-              <div>
-                <h3 className="modal-title">Yeni İsim Önerisi Ekle</h3>
-                <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                  Öneren: <strong style={{ color: '#FFFFFF' }}>{activeUser?.name}</strong>
-                </p>
-              </div>
-              <button
-                id="close-add-modal"
-                onClick={() => setShowAddModal(false)}
-                className="modal-close-btn"
-              >
-                <X size={18} />
+        <div className="modal-backdrop" id="add-modal">
+          <div className="modal-box">
+            <div className="modal-title-row">
+              <h3 style={{ fontSize: '1.15rem', fontWeight: 700, color: '#FFFFFF' }}>
+                Yeni İsim Önerisi Ekle
+              </h3>
+              <button onClick={() => setShowAddModal(false)} className="btn btn-outline btn-sm">
+                <X size={14} />
               </button>
             </div>
 
             <form onSubmit={handleAddSuggestion}>
-              <div className="form-group">
-                <label className="form-label" htmlFor="input-sug-name">
+              <div className="field-group">
+                <label className="field-label" htmlFor="input-name">
                   Proje / Marka İsmi *
                 </label>
                 <input
-                  id="input-sug-name"
+                  id="input-name"
                   type="text"
                   required
-                  placeholder="Örn: NovaForge, Lumivex, Pusula..."
+                  placeholder="Örn: Vera, Pusula, Zemin..."
                   value={newSugName}
                   onChange={(e) => setNewSugName(e.target.value)}
-                  className="form-input"
+                  className="field-input"
                   autoFocus
                 />
               </div>
 
-              <div className="form-group">
-                <label className="form-label" htmlFor="input-sug-meaning">
+              <div className="field-group">
+                <label className="field-label" htmlFor="input-meaning">
                   Ne Anlama Geliyor? (Açıklama / Köken) *
                 </label>
                 <textarea
-                  id="input-sug-meaning"
+                  id="input-meaning"
                   required
-                  placeholder="Bu ismin anlamı nedir, hangi dilden türedi, projeyi neden iyi temsil ediyor?"
+                  rows={4}
+                  placeholder="Kelimenin anlamı, kökeni ve projenin vizyonuyla uyumu..."
                   value={newSugMeaning}
                   onChange={(e) => setNewSugMeaning(e.target.value)}
-                  className="form-textarea"
-                  rows={4}
+                  className="field-textarea"
                 />
-                <span className="form-helper">
-                  Diğer 2 ortağınızın oy verirken anlayabilmesi için detaylı açıklayın.
-                </span>
               </div>
 
-              <div className="form-group">
-                <label className="form-label" htmlFor="input-sug-tagline">
+              <div className="field-group">
+                <label className="field-label" htmlFor="input-tagline">
                   Slogan / Kısa Açıklama (İsteğe Bağlı)
                 </label>
                 <input
-                  id="input-sug-tagline"
+                  id="input-tagline"
                   type="text"
-                  placeholder="Örn: Geleceği aydınlatan yeni nesil platform"
+                  placeholder="Örn: Doğru ve sağlam temeller üzerinde"
                   value={newSugTagline}
                   onChange={(e) => setNewSugTagline(e.target.value)}
-                  className="form-input"
+                  className="field-input"
                 />
               </div>
 
-              <div className="form-group">
-                <label className="form-label" htmlFor="input-sug-tags">
+              <div className="field-group">
+                <label className="field-label" htmlFor="input-tags">
                   Etiketler (Virgülle ayırın)
                 </label>
                 <input
-                  id="input-sug-tags"
+                  id="input-tags"
                   type="text"
-                  placeholder="Teknoloji, Modern, Global, Türkçe, Kısa"
+                  placeholder="Türkçe, Minimal, Evrensel, Kurumsal"
                   value={newSugTags}
                   onChange={(e) => setNewSugTags(e.target.value)}
-                  className="form-input"
+                  className="field-input"
                 />
               </div>
 
-              <div className="form-group">
-                <label className="form-label" htmlFor="input-sug-domain">
+              <div className="field-group">
+                <label className="field-label" htmlFor="input-domain">
                   Alan Adı (.com) Durumu
                 </label>
                 <select
-                  id="input-sug-domain"
+                  id="input-domain"
                   value={newSugDomain}
                   onChange={(e) => setNewSugDomain(e.target.value as any)}
-                  className="form-select"
+                  className="field-select"
                 >
                   <option value="available">Müsait / Satın Alınabilir</option>
                   <option value="unknown">Henüz Kontrol Edilmedi</option>
-                  <option value="taken">Dolu / Alternatif Uzantı Gerekir</option>
+                  <option value="taken">Dolu / Alternatif Gerekir</option>
                 </select>
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '1.5rem' }}>
-                <button
-                  type="button"
-                  onClick={() => setShowAddModal(false)}
-                  className="btn btn-outline"
-                >
-                  İptal
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', marginTop: '1.25rem' }}>
+                <button type="button" onClick={() => setShowAddModal(false)} className="btn btn-outline">
+                  Vazgeç
                 </button>
-                <button
-                  id="submit-sug-btn"
-                  type="submit"
-                  disabled={submittingSug}
-                  className="btn btn-gradient"
-                >
+                <button type="submit" disabled={submittingSug} className="btn btn-primary">
                   {submittingSug ? 'Kaydediliyor...' : 'Öneriyi Kaydet'}
                 </button>
               </div>
@@ -1249,87 +1303,66 @@ export default function HomePage() {
         </div>
       )}
 
-      {/* MODAL 2: START VOTING SESSION */}
+      {/* MODAL 2: START VOTING */}
       {showStartSessionModal && (
-        <div className="modal-overlay" id="start-session-modal">
-          <div className="modal-dialog">
-            <div className="modal-header">
-              <div>
-                <h3 className="modal-title">Yeni Oylama Oturumu Başlat</h3>
-                <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                  3 kullanıcıdan biri olarak resmi oylamayı başlatıyorsunuz.
-                </p>
-              </div>
-              <button
-                id="close-start-session-modal"
-                onClick={() => setShowStartSessionModal(false)}
-                className="modal-close-btn"
-              >
-                <X size={18} />
+        <div className="modal-backdrop" id="start-session-modal">
+          <div className="modal-box">
+            <div className="modal-title-row">
+              <h3 style={{ fontSize: '1.15rem', fontWeight: 700, color: '#FFFFFF' }}>
+                Yeni Oylama Turu Başlat
+              </h3>
+              <button onClick={() => setShowStartSessionModal(false)} className="btn btn-outline btn-sm">
+                <X size={14} />
               </button>
             </div>
 
             <form onSubmit={handleStartSession}>
-              <div className="form-group">
-                <label className="form-label" htmlFor="input-session-title">
+              <div className="field-group">
+                <label className="field-label" htmlFor="session-title">
                   Oylama Başlığı *
                 </label>
                 <input
-                  id="input-session-title"
+                  id="session-title"
                   type="text"
                   required
-                  placeholder="Örn: 1. Tur Ön Eleme Oylaması, Büyük Final"
                   value={newSessionTitle}
                   onChange={(e) => setNewSessionTitle(e.target.value)}
-                  className="form-input"
+                  className="field-input"
                 />
               </div>
 
-              <div className="form-group">
-                <label className="form-label" htmlFor="input-session-desc">
-                  Oylama Notu / Açıklama
+              <div className="field-group">
+                <label className="field-label" htmlFor="session-desc">
+                  Oylama Açıklaması
                 </label>
                 <textarea
-                  id="input-session-desc"
+                  id="session-desc"
                   rows={2}
-                  placeholder="Tüm önerilere 1-10 arası puan verilecektir..."
                   value={newSessionDesc}
                   onChange={(e) => setNewSessionDesc(e.target.value)}
-                  className="form-textarea"
+                  className="field-textarea"
                 />
               </div>
 
               <div
                 style={{
-                  background: 'rgba(99, 102, 241, 0.1)',
-                  border: '1px solid rgba(99, 102, 241, 0.25)',
-                  padding: '1rem',
-                  borderRadius: 'var(--radius-md)',
+                  background: 'var(--bg-input)',
+                  border: '1px solid var(--border-subtle)',
+                  padding: '0.85rem',
+                  borderRadius: 'var(--radius-sm)',
+                  fontSize: '0.8rem',
+                  color: 'var(--text-muted)',
                   marginBottom: '1.25rem',
                 }}
               >
-                <div style={{ fontSize: '0.85rem', fontWeight: 600, color: '#A5B4FC', marginBottom: '0.35rem' }}>
-                  ℹ️ Oylama Bilgisi
-                </div>
-                <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-                  Oylama başladığında ekranda canlı banner belirecek. Sistemdeki tüm <strong>{suggestions.length}</strong> isim önerisi oylamaya dahil edilecektir.
-                </div>
+                Sistemdeki tüm <strong>{suggestions.length}</strong> isim önerisi oylamaya dahil edilecektir. 3 ortak da 1-10 arası puan verecektir.
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
-                <button
-                  type="button"
-                  onClick={() => setShowStartSessionModal(false)}
-                  className="btn btn-outline"
-                >
-                  Vazgeç
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
+                <button type="button" onClick={() => setShowStartSessionModal(false)} className="btn btn-outline">
+                  İptal
                 </button>
-                <button
-                  id="confirm-start-session-btn"
-                  type="submit"
-                  disabled={submittingSession}
-                  className="btn btn-primary"
-                >
+                <button type="submit" disabled={submittingSession} className="btn btn-primary">
                   {submittingSession ? 'Başlatılıyor...' : 'Oylamayı Başlat'}
                 </button>
               </div>
@@ -1338,200 +1371,105 @@ export default function HomePage() {
         </div>
       )}
 
-      {/* MODAL 3: INTERACTIVE BALLOT VOTING */}
+      {/* MODAL 3: VOTING BALLOT (1-10 SCORE) */}
       {showVoteModal && activeSession && (
-        <div className="modal-overlay" id="ballot-modal">
-          <div className="modal-dialog" style={{ maxWidth: '750px' }}>
-            <div className="modal-header">
+        <div className="modal-backdrop" id="ballot-modal">
+          <div className="modal-box" style={{ maxWidth: '680px' }}>
+            <div className="modal-title-row">
               <div>
-                <h3 className="modal-title">Oyunu Kullan (1-10 Puan)</h3>
-                <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                  Kullanıcı: <strong style={{ color: '#FFFFFF' }}>{activeUser?.name}</strong> · Oturum: {activeSession.title}
+                <h3 style={{ fontSize: '1.2rem', fontWeight: 700, color: '#FFFFFF' }}>
+                  Oy Kullan (1 - 10 Puan)
+                </h3>
+                <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                  Oy veren: <strong style={{ color: '#FFFFFF' }}>{authenticatedUser.name}</strong>
                 </p>
               </div>
-              <button
-                id="close-vote-modal"
-                onClick={() => setShowVoteModal(false)}
-                className="modal-close-btn"
-              >
-                <X size={18} />
+              <button onClick={() => setShowVoteModal(false)} className="btn btn-outline btn-sm">
+                <X size={14} />
               </button>
             </div>
 
             <form onSubmit={handleSubmitVotes}>
-              <div style={{ maxHeight: '55vh', overflowY: 'auto', paddingRight: '0.5rem', marginBottom: '1.25rem' }}>
+              <div style={{ maxHeight: '50vh', overflowY: 'auto', paddingRight: '0.5rem', marginBottom: '1.25rem' }}>
                 {suggestions.map((sug, index) => {
-                  const currentScore = ballotScores[sug.id]?.score ?? 7;
+                  const currentScore = ballotScores[sug.id]?.score ?? 8;
                   const currentNote = ballotScores[sug.id]?.note ?? '';
 
                   return (
-                    <div key={sug.id} className="ballot-item" id={`ballot-item-${sug.id}`}>
-                      <div className="ballot-item-header">
-                        <span style={{ fontSize: '0.8rem', color: 'var(--text-dim)', fontWeight: 700 }}>
-                          #{index + 1}
-                        </span>
-                        <div className="ballot-item-title">{sug.name}</div>
-                        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                    <div
+                      key={sug.id}
+                      style={{
+                        background: 'var(--bg-input)',
+                        border: '1px solid var(--border-subtle)',
+                        borderRadius: 'var(--radius-sm)',
+                        padding: '1rem',
+                        marginBottom: '0.85rem',
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '0.35rem' }}>
+                        <div style={{ fontWeight: 700, fontSize: '1.05rem', color: '#FFFFFF' }}>
+                          #{index + 1} {sug.name}
+                        </div>
+                        <span style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>
                           Öneren: {sug.created_by_name}
                         </span>
                       </div>
 
-                      <p className="ballot-item-meaning">
-                        <strong>Anlam:</strong> {sug.meaning}
+                      <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginBottom: '0.75rem', lineHeight: 1.45 }}>
+                        {sug.meaning}
                       </p>
 
-                      {/* Score Selector (1 to 10) */}
-                      <div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.35rem' }}>
-                          <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)' }}>
-                            Puanınız (1 = Zayıf, 10 = Mükemmel):
-                          </span>
-                          <span style={{ fontSize: '0.85rem', fontWeight: 800, color: 'var(--gold)' }}>
-                            {currentScore} / 10 Puan
-                          </span>
-                        </div>
-
-                        <div className="score-selector-grid">
-                          {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((num) => (
-                            <button
-                              key={num}
-                              type="button"
-                              id={`score-btn-${sug.id}-${num}`}
-                              onClick={() => {
-                                setBallotScores({
-                                  ...ballotScores,
-                                  [sug.id]: {
-                                    score: num,
-                                    note: currentNote,
-                                  },
-                                });
-                              }}
-                              className={`score-btn ${currentScore === num ? 'selected' : ''}`}
-                            >
-                              {num}
-                            </button>
-                          ))}
-                        </div>
-
-                        <input
-                          type="text"
-                          placeholder="Kısa bir görüş veya eleştiri notu (isteğe bağlı)..."
-                          value={currentNote}
-                          onChange={(e) => {
-                            setBallotScores({
-                              ...ballotScores,
-                              [sug.id]: {
-                                score: currentScore,
-                                note: e.target.value,
-                              },
-                            });
-                          }}
-                          className="form-input"
-                          style={{ padding: '0.45rem 0.75rem', fontSize: '0.8rem' }}
-                        />
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' }}>
+                        <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: 600 }}>
+                          Puanınız:
+                        </span>
+                        <span style={{ fontSize: '0.85rem', fontWeight: 700, color: '#FFFFFF' }}>
+                          {currentScore} / 10
+                        </span>
                       </div>
+
+                      <div className="score-pill-row">
+                        {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((score) => (
+                          <button
+                            key={score}
+                            type="button"
+                            onClick={() =>
+                              setBallotScores({
+                                ...ballotScores,
+                                [sug.id]: { score, note: currentNote },
+                              })
+                            }
+                            className={`score-pill ${currentScore === score ? 'active' : ''}`}
+                          >
+                            {score}
+                          </button>
+                        ))}
+                      </div>
+
+                      <input
+                        type="text"
+                        placeholder="İsteğe bağlı görüş veya eleştiri notu..."
+                        value={currentNote}
+                        onChange={(e) =>
+                          setBallotScores({
+                            ...ballotScores,
+                            [sug.id]: { score: currentScore, note: e.target.value },
+                          })
+                        }
+                        className="field-input"
+                        style={{ marginTop: '0.5rem', padding: '0.45rem 0.75rem', fontSize: '0.8rem' }}
+                      />
                     </div>
                   );
                 })}
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                  Tüm isimlere verdiğiniz puanlar kaydedilecektir.
-                </span>
-                <div style={{ display: 'flex', gap: '0.75rem' }}>
-                  <button
-                    type="button"
-                    onClick={() => setShowVoteModal(false)}
-                    className="btn btn-outline"
-                  >
-                    İptal
-                  </button>
-                  <button
-                    id="submit-ballot-btn"
-                    type="submit"
-                    disabled={submittingVotes}
-                    className="btn btn-gradient"
-                  >
-                    {submittingVotes ? 'Oylar Kaydediliyor...' : 'Oylarımı Kaydet'}
-                  </button>
-                </div>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL 4: EDIT USER PROFILE */}
-      {showEditUserModal && activeUser && (
-        <div className="modal-overlay" id="edit-user-modal">
-          <div className="modal-dialog" style={{ maxWidth: '440px' }}>
-            <div className="modal-header">
-              <h3 className="modal-title">Kullanıcı Profilini Düzenle</h3>
-              <button
-                id="close-edit-user-modal"
-                onClick={() => setShowEditUserModal(false)}
-                className="modal-close-btn"
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            <form onSubmit={handleSaveUser}>
-              <div className="form-group">
-                <label className="form-label" htmlFor="edit-username-input">
-                  Adınız / Takma Adınız
-                </label>
-                <input
-                  id="edit-username-input"
-                  type="text"
-                  required
-                  value={editUserName}
-                  onChange={(e) => setEditUserName(e.target.value)}
-                  className="form-input"
-                  placeholder="Örn: Ahmet, Mehmet, Ayşe..."
-                />
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Avatar Emoji</label>
-                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.5rem' }}>
-                  {['⚡', '💎', '🚀', '🌟', '🔥', '👑', '🎯', '🦁', '🦉'].map((emoji) => (
-                    <button
-                      key={emoji}
-                      type="button"
-                      onClick={() => setEditUserAvatar(emoji)}
-                      style={{
-                        fontSize: '1.3rem',
-                        width: '42px',
-                        height: '42px',
-                        borderRadius: 'var(--radius-sm)',
-                        background: editUserAvatar === emoji ? 'var(--primary)' : 'rgba(255,255,255,0.06)',
-                        border: '1px solid var(--border-subtle)',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      {emoji}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '1.5rem' }}>
-                <button
-                  type="button"
-                  onClick={() => setShowEditUserModal(false)}
-                  className="btn btn-outline"
-                >
-                  Vazgeç
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
+                <button type="button" onClick={() => setShowVoteModal(false)} className="btn btn-outline">
+                  İptal
                 </button>
-                <button
-                  id="save-user-profile-btn"
-                  type="submit"
-                  disabled={submittingUserEdit}
-                  className="btn btn-primary"
-                >
-                  {submittingUserEdit ? 'Kaydediliyor...' : 'Kaydet'}
+                <button type="submit" disabled={submittingVotes} className="btn btn-primary">
+                  {submittingVotes ? 'Kaydediliyor...' : 'Oylarımı Kaydet'}
                 </button>
               </div>
             </form>
@@ -1539,51 +1477,45 @@ export default function HomePage() {
         </div>
       )}
 
-      {/* MODAL 5: COMMENTS / DISCUSSION */}
+      {/* MODAL 4: COMMENTS */}
       {showCommentsModal && (
-        <div className="modal-overlay" id="comments-modal">
-          <div className="modal-dialog">
-            <div className="modal-header">
+        <div className="modal-backdrop" id="comments-modal">
+          <div className="modal-box">
+            <div className="modal-title-row">
               <div>
-                <h3 className="modal-title">&ldquo;{showCommentsModal.name}&rdquo; Hakkında Görüşler</h3>
-                <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                  3 ortağın fikir alışverişi ve geri bildirimleri
-                </p>
+                <h3 style={{ fontSize: '1.15rem', fontWeight: 700, color: '#FFFFFF' }}>
+                  &ldquo;{showCommentsModal.name}&rdquo; Görüşleri
+                </h3>
               </div>
-              <button
-                id="close-comments-modal"
-                onClick={() => setShowCommentsModal(null)}
-                className="modal-close-btn"
-              >
-                <X size={18} />
+              <button onClick={() => setShowCommentsModal(null)} className="btn btn-outline btn-sm">
+                <X size={14} />
               </button>
             </div>
 
-            {/* Existing comments */}
-            <div style={{ maxHeight: '40vh', overflowY: 'auto', marginBottom: '1.25rem' }}>
+            <div style={{ maxHeight: '35vh', overflowY: 'auto', marginBottom: '1rem' }}>
               {commentsList.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: '2rem 1rem', color: 'var(--text-muted)' }}>
-                  Bu öneri hakkında henüz bir yorum yapılmadı. İlk yorumu siz yazın!
+                <div style={{ textAlign: 'center', padding: '2rem 1rem', color: 'var(--text-dim)', fontSize: '0.85rem' }}>
+                  Henüz yorum yapılmadı. İlk düşüncenizi paylaşın.
                 </div>
               ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
                   {commentsList.map((c) => (
                     <div
                       key={c.id}
                       style={{
-                        background: 'rgba(10, 14, 25, 0.65)',
+                        background: 'var(--bg-input)',
                         border: '1px solid var(--border-subtle)',
-                        borderRadius: 'var(--radius-md)',
-                        padding: '0.85rem 1rem',
+                        borderRadius: 'var(--radius-sm)',
+                        padding: '0.75rem 0.85rem',
                       }}
                     >
-                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.35rem' }}>
-                        <strong style={{ fontSize: '0.85rem', color: '#FFFFFF' }}>{c.user_name}</strong>
-                        <span style={{ fontSize: '0.72rem', color: 'var(--text-dim)' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.25rem' }}>
+                        <strong style={{ fontSize: '0.8rem', color: '#FFFFFF' }}>{c.user_name}</strong>
+                        <span style={{ fontSize: '0.7rem', color: 'var(--text-dim)' }}>
                           {new Date(c.created_at).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}
                         </span>
                       </div>
-                      <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', lineHeight: 1.45 }}>
+                      <p style={{ fontSize: '0.825rem', color: 'var(--text-secondary)', lineHeight: 1.4 }}>
                         {c.text}
                       </p>
                     </div>
@@ -1592,33 +1524,22 @@ export default function HomePage() {
               )}
             </div>
 
-            {/* Add new comment form */}
             <form onSubmit={handleAddComment}>
-              <div className="form-group">
+              <div className="field-group">
                 <input
-                  id="new-comment-input"
                   type="text"
                   required
-                  placeholder={`${activeUser?.name} olarak bir düşünce veya öneri paylaşın...`}
+                  placeholder={`${authenticatedUser.name} olarak yorum yazın...`}
                   value={newCommentText}
                   onChange={(e) => setNewCommentText(e.target.value)}
-                  className="form-input"
+                  className="field-input"
                 />
               </div>
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
-                <button
-                  type="button"
-                  onClick={() => setShowCommentsModal(null)}
-                  className="btn btn-outline btn-sm"
-                >
+                <button type="button" onClick={() => setShowCommentsModal(null)} className="btn btn-outline btn-sm">
                   Kapat
                 </button>
-                <button
-                  id="submit-comment-btn"
-                  type="submit"
-                  disabled={submittingComment}
-                  className="btn btn-primary btn-sm"
-                >
+                <button type="submit" disabled={submittingComment} className="btn btn-primary btn-sm">
                   {submittingComment ? 'Gönderiliyor...' : 'Yorum Yaz'}
                 </button>
               </div>
@@ -1627,74 +1548,51 @@ export default function HomePage() {
         </div>
       )}
 
-      {/* MODAL 6: DB STATUS & VERCEL GUIDE */}
+      {/* MODAL 5: DB STATUS */}
       {showDbGuideModal && (
-        <div className="modal-overlay" id="db-guide-modal">
-          <div className="modal-dialog">
-            <div className="modal-header">
-              <div>
-                <h3 className="modal-title">Veritabanı ve Vercel Durumu</h3>
-                <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                  Canlı ve Yerel Veritabanı Bilgileri
-                </p>
-              </div>
-              <button
-                id="close-db-modal"
-                onClick={() => setShowDbGuideModal(false)}
-                className="modal-close-btn"
-              >
-                <X size={18} />
+        <div className="modal-backdrop" id="db-guide-modal">
+          <div className="modal-box">
+            <div className="modal-title-row">
+              <h3 style={{ fontSize: '1.15rem', fontWeight: 700, color: '#FFFFFF' }}>
+                Veritabanı Durumu
+              </h3>
+              <button onClick={() => setShowDbGuideModal(false)} className="btn btn-outline btn-sm">
+                <X size={14} />
               </button>
             </div>
 
             <div style={{ marginBottom: '1.25rem' }}>
               <div
                 style={{
-                  background: 'rgba(0, 0, 0, 0.35)',
+                  background: 'var(--bg-input)',
                   border: '1px solid var(--border-subtle)',
-                  borderRadius: 'var(--radius-md)',
-                  padding: '1rem',
+                  borderRadius: 'var(--radius-sm)',
+                  padding: '0.85rem',
                   marginBottom: '1rem',
                 }}
               >
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-                  <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Aktif DB Motoru:</span>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Aktif Motor:</span>
                   <span
                     style={{
-                      fontSize: '0.8rem',
+                      fontSize: '0.78rem',
                       fontWeight: 700,
-                      padding: '0.2rem 0.6rem',
-                      borderRadius: 'var(--radius-full)',
-                      background: dbStatus?.type === 'postgres' ? 'rgba(16, 185, 129, 0.2)' : 'rgba(245, 158, 11, 0.2)',
                       color: dbStatus?.type === 'postgres' ? '#34D399' : '#FBBF24',
                     }}
                   >
                     {dbStatus?.type === 'postgres' ? 'PostgreSQL (Vercel / Neon)' : 'Yerel Veritabanı (.data/db.json)'}
                   </span>
                 </div>
-
-                {dbStatus?.connectionString && (
-                  <div style={{ fontSize: '0.78rem', color: 'var(--text-dim)', wordBreak: 'break-all' }}>
-                    URL: {dbStatus.connectionString}
-                  </div>
-                )}
               </div>
 
-              <h4 style={{ fontSize: '0.95rem', fontWeight: 700, color: '#FFFFFF', marginBottom: '0.4rem' }}>
-                🚀 Vercel&apos;de Yayına Alırken:
-              </h4>
-              <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.5, marginBottom: '0.75rem' }}>
-                Vercel Dashboard&apos;da projenize bir <strong>Vercel Postgres (Neon)</strong> veritabanı eklediğinizde veya Supabase bağlantı dizginizi <code style={{ color: '#38BDF8' }}>DATABASE_URL</code> olarak girdiğinizde, uygulama otomatik olarak Postgres&apos;e geçiş yapar.
+              <p style={{ fontSize: '0.825rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                Vercel ortamında kalıcı veritabanı için projenize <strong>Vercel Postgres (Neon)</strong> bağlayabilir veya <code style={{ color: '#93C5FD' }}>DATABASE_URL</code> ortam değişkenini tanımlayabilirsiniz.
               </p>
-              <div className="code-snippet">DATABASE_URL=postgres://user:pass@host/dbname</div>
             </div>
 
             <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-              <button
-                onClick={() => setShowDbGuideModal(false)}
-                className="btn btn-primary btn-sm"
-              >
-                Anladım
+              <button onClick={() => setShowDbGuideModal(false)} className="btn btn-primary btn-sm">
+                Kapat
               </button>
             </div>
           </div>
