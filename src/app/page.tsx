@@ -22,6 +22,7 @@ import {
   User as UserIcon,
   ShieldCheck,
   ChevronRight,
+  Pencil,
 } from 'lucide-react';
 import { User, Suggestion, VotingSession, LeaderboardItem, Comment } from '@/lib/types';
 
@@ -66,6 +67,15 @@ export default function HomePage() {
   const [newSugTags, setNewSugTags] = useState('');
   const [newSugDomain, setNewSugDomain] = useState<'available' | 'taken' | 'unknown'>('available');
   const [submittingSug, setSubmittingSug] = useState(false);
+
+  // Form State: Edit Suggestion
+  const [editingSug, setEditingSug] = useState<Suggestion | null>(null);
+  const [editSugName, setEditSugName] = useState('');
+  const [editSugMeaning, setEditSugMeaning] = useState('');
+  const [editSugTagline, setEditSugTagline] = useState('');
+  const [editSugTags, setEditSugTags] = useState('');
+  const [editSugDomain, setEditSugDomain] = useState<'available' | 'taken' | 'unknown'>('available');
+  const [submittingEdit, setSubmittingEdit] = useState(false);
 
   // Form State: Start Session
   const [newSessionTitle, setNewSessionTitle] = useState('1. Tur İsim Oylaması');
@@ -274,18 +284,73 @@ export default function HomePage() {
     }
   };
 
+  // Edit Suggestion Handler
+  const openEditSuggestion = (sug: Suggestion) => {
+    setEditingSug(sug);
+    setEditSugName(sug.name);
+    setEditSugMeaning(sug.meaning);
+    setEditSugTagline(sug.tagline || '');
+    setEditSugTags((sug.tags || []).join(', '));
+    setEditSugDomain((sug.domain_status as 'available' | 'taken' | 'unknown') || 'unknown');
+  };
+
+  const handleUpdateSuggestion = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingSug || !authenticatedUser || !editSugName.trim() || !editSugMeaning.trim()) return;
+
+    try {
+      setSubmittingEdit(true);
+      const res = await fetch(`/api/suggestions/${editingSug.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: authenticatedUser.id,
+          name: editSugName.trim(),
+          meaning: editSugMeaning.trim(),
+          tagline: editSugTagline.trim(),
+          domain_status: editSugDomain,
+          tags: editSugTags
+            ? editSugTags.split(',').map((t) => t.trim()).filter(Boolean)
+            : [],
+        }),
+      });
+
+      const data = await res.json();
+      if (data.success && data.suggestion) {
+        setSuggestions((prev) =>
+          prev.map((s) => (s.id === editingSug.id ? data.suggestion : s))
+        );
+        setEditingSug(null);
+      } else {
+        alert(data.error || 'Düzenleme kaydedilemedi.');
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Bir hata meydana geldi.');
+    } finally {
+      setSubmittingEdit(false);
+    }
+  };
+
   // Delete Suggestion
   const handleDeleteSuggestion = async (id: string, name: string) => {
     if (!confirm(`"${name}" isim önerisini silmek istediğinize emin misiniz?`)) return;
 
     try {
-      const res = await fetch(`/api/suggestions/${id}`, { method: 'DELETE' });
+      const res = await fetch(`/api/suggestions/${id}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: authenticatedUser?.id }),
+      });
       const data = await res.json();
       if (data.success) {
-        setSuggestions(suggestions.filter((s) => s.id !== id));
+        setSuggestions((prev) => prev.filter((s) => s.id !== id));
+      } else {
+        alert(data.error || 'Silme işlemi başarısız oldu.');
       }
     } catch (err) {
       console.error(err);
+      alert('İstek gönderilirken bir hata oluştu.');
     }
   };
 
@@ -911,14 +976,29 @@ export default function HomePage() {
                           <span>Yorum</span>
                         </button>
 
-                        <button
-                          onClick={() => handleDeleteSuggestion(sug.id, sug.name)}
-                          className="btn btn-danger btn-sm"
-                          style={{ padding: '0.25rem 0.5rem' }}
-                          title="Öneriyi Sil"
-                        >
-                          <Trash2 size={12} />
-                        </button>
+                        {/* Sadece öneriyi ekleyen kullanıcı düzenleyebilir ve silebilir (veya başlangıç demo verileri) */}
+                        {authenticatedUser && (authenticatedUser.id === sug.created_by_id || ['sug_1', 'sug_2', 'sug_3'].includes(sug.id)) && (
+                          <>
+                            <button
+                              onClick={() => openEditSuggestion(sug)}
+                              className="btn btn-outline btn-sm"
+                              style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}
+                              title="Öneriyi Düzenle"
+                            >
+                              <Pencil size={12} />
+                              <span>Düzenle</span>
+                            </button>
+
+                            <button
+                              onClick={() => handleDeleteSuggestion(sug.id, sug.name)}
+                              className="btn btn-danger btn-sm"
+                              style={{ padding: '0.25rem 0.5rem' }}
+                              title="Öneriyi Sil"
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          </>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -1269,6 +1349,105 @@ export default function HomePage() {
                 </button>
                 <button type="submit" disabled={submittingSug} className="btn btn-primary">
                   {submittingSug ? 'Kaydediliyor...' : 'Öneriyi Kaydet'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: EDIT SUGGESTION */}
+      {editingSug && (
+        <div className="modal-backdrop" id="edit-modal">
+          <div className="modal-box">
+            <div className="modal-title-row">
+              <h3 style={{ fontSize: '1.15rem', fontWeight: 700, color: '#FFFFFF' }}>
+                İsim Önerisini Düzenle
+              </h3>
+              <button onClick={() => setEditingSug(null)} className="btn btn-outline btn-sm">
+                <X size={14} />
+              </button>
+            </div>
+
+            <form onSubmit={handleUpdateSuggestion}>
+              <div className="field-group">
+                <label className="field-label" htmlFor="edit-name">
+                  Proje / Marka İsmi *
+                </label>
+                <input
+                  id="edit-name"
+                  type="text"
+                  required
+                  value={editSugName}
+                  onChange={(e) => setEditSugName(e.target.value)}
+                  className="field-input"
+                  autoFocus
+                />
+              </div>
+
+              <div className="field-group">
+                <label className="field-label" htmlFor="edit-meaning">
+                  Ne Anlama Geliyor? (Açıklama / Köken) *
+                </label>
+                <textarea
+                  id="edit-meaning"
+                  required
+                  rows={4}
+                  value={editSugMeaning}
+                  onChange={(e) => setEditSugMeaning(e.target.value)}
+                  className="field-textarea"
+                />
+              </div>
+
+              <div className="field-group">
+                <label className="field-label" htmlFor="edit-tagline">
+                  Slogan / Kısa Açıklama (İsteğe Bağlı)
+                </label>
+                <input
+                  id="edit-tagline"
+                  type="text"
+                  value={editSugTagline}
+                  onChange={(e) => setEditSugTagline(e.target.value)}
+                  className="field-input"
+                />
+              </div>
+
+              <div className="field-group">
+                <label className="field-label" htmlFor="edit-tags">
+                  Etiketler (Virgülle ayırın)
+                </label>
+                <input
+                  id="edit-tags"
+                  type="text"
+                  placeholder="Türkçe, Minimal, Evrensel, Kurumsal"
+                  value={editSugTags}
+                  onChange={(e) => setEditSugTags(e.target.value)}
+                  className="field-input"
+                />
+              </div>
+
+              <div className="field-group">
+                <label className="field-label" htmlFor="edit-domain">
+                  Alan Adı (.com) Durumu
+                </label>
+                <select
+                  id="edit-domain"
+                  value={editSugDomain}
+                  onChange={(e) => setEditSugDomain(e.target.value as any)}
+                  className="field-select"
+                >
+                  <option value="available">Müsait / Satın Alınabilir</option>
+                  <option value="unknown">Henüz Kontrol Edilmedi</option>
+                  <option value="taken">Dolu / Alternatif Gerekir</option>
+                </select>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', marginTop: '1.25rem' }}>
+                <button type="button" onClick={() => setEditingSug(null)} className="btn btn-outline">
+                  Vazgeç
+                </button>
+                <button type="submit" disabled={submittingEdit} className="btn btn-primary">
+                  {submittingEdit ? 'Kaydediliyor...' : 'Değişiklikleri Kaydet'}
                 </button>
               </div>
             </form>

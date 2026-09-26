@@ -219,26 +219,17 @@ async function ensurePgSchema() {
       );
     }
 
-    // Seed default suggestions if empty
-    const sugCountRes = await queryPg('SELECT COUNT(*) FROM suggestions');
-    if (parseInt(sugCountRes.rows[0].count, 10) === 0) {
-      for (const s of INITIAL_SUGGESTIONS) {
-        await queryPg(
-          'INSERT INTO suggestions (id, name, meaning, tagline, domain_status, tags, created_by_id, created_by_name, status, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)',
-          [
-            s.id,
-            s.name,
-            s.meaning,
-            s.tagline || '',
-            s.domain_status || 'unknown',
-            JSON.stringify(s.tags || []),
-            s.created_by_id,
-            s.created_by_name,
-            s.status,
-            s.created_at,
-          ]
-        );
-      }
+    // Ensure system_metadata table exists to prevent re-seeding after deletion
+    await queryPg(`
+      CREATE TABLE IF NOT EXISTS system_metadata (
+        key VARCHAR(50) PRIMARY KEY,
+        value TEXT
+      );
+    `);
+
+    const seedCheck = await queryPg("SELECT value FROM system_metadata WHERE key = 'initial_seed_done'");
+    if (seedCheck.rows.length === 0) {
+      await queryPg("INSERT INTO system_metadata (key, value) VALUES ('initial_seed_done', 'true') ON CONFLICT (key) DO NOTHING");
     }
 
     pgInitialized = true;
@@ -271,7 +262,7 @@ function getLocalData(): LocalDbSchema {
   // Initialize defaults
   const initialData: LocalDbSchema = {
     users: DEFAULT_USERS,
-    suggestions: INITIAL_SUGGESTIONS,
+    suggestions: [],
     voting_sessions: [],
     votes: [],
     comments: [],
@@ -439,32 +430,117 @@ export const db = {
     if (isPostgresConfigured()) {
       await ensurePgSchema();
       const res = await queryPg('SELECT * FROM suggestions ORDER BY created_at DESC');
-      if (res.rows.length > 0) {
-        return res.rows.map((r: any) => {
-          let tags: string[] = [];
-          try {
-            tags = typeof r.tags === 'string' ? JSON.parse(r.tags) : r.tags || [];
-          } catch {
-            tags = r.tags ? [String(r.tags)] : [];
-          }
-          return {
-            id: r.id,
-            name: r.name,
-            meaning: r.meaning,
-            tagline: r.tagline || '',
-            domain_status: r.domain_status || 'unknown',
-            tags,
-            created_by_id: r.created_by_id,
-            created_by_name: r.created_by_name,
-            status: r.status || 'active',
-            created_at: new Date(r.created_at).toISOString(),
-          };
-        });
-      }
+      return res.rows.map((r: any) => {
+        let tags: string[] = [];
+        try {
+          tags = typeof r.tags === 'string' ? JSON.parse(r.tags) : r.tags || [];
+        } catch {
+          tags = r.tags ? [String(r.tags)] : [];
+        }
+        return {
+          id: r.id,
+          name: r.name,
+          meaning: r.meaning,
+          tagline: r.tagline || '',
+          domain_status: r.domain_status || 'unknown',
+          tags,
+          created_by_id: r.created_by_id,
+          created_by_name: r.created_by_name,
+          status: r.status || 'active',
+          created_at: new Date(r.created_at).toISOString(),
+        };
+      });
     }
 
     const local = getLocalData();
     return local.suggestions;
+  },
+
+  async getSuggestionById(id: string): Promise<Suggestion | null> {
+    if (isPostgresConfigured()) {
+      await ensurePgSchema();
+      const res = await queryPg('SELECT * FROM suggestions WHERE id = $1', [id]);
+      if (res.rows.length === 0) return null;
+      const r = res.rows[0];
+      let tags: string[] = [];
+      try {
+        tags = typeof r.tags === 'string' ? JSON.parse(r.tags) : r.tags || [];
+      } catch {
+        tags = [];
+      }
+      return {
+        id: r.id,
+        name: r.name,
+        meaning: r.meaning,
+        tagline: r.tagline || '',
+        domain_status: r.domain_status || 'unknown',
+        tags,
+        created_by_id: r.created_by_id,
+        created_by_name: r.created_by_name,
+        status: r.status || 'active',
+        created_at: new Date(r.created_at).toISOString(),
+      };
+    }
+
+    const local = getLocalData();
+    return local.suggestions.find((s) => s.id === id) || null;
+  },
+
+  async updateSuggestion(
+    id: string,
+    data: {
+      name?: string;
+      meaning?: string;
+      tagline?: string;
+      domain_status?: 'available' | 'taken' | 'unknown';
+      tags?: string[];
+    },
+    userId?: string
+  ): Promise<{ success: boolean; error?: string; suggestion?: Suggestion }> {
+    const sug = await this.getSuggestionById(id);
+    if (!sug) {
+      return { success: false, error: 'Öneri bulunamadı.' };
+    }
+
+    const isInitialMock = ['sug_1', 'sug_2', 'sug_3'].includes(sug.id);
+    if (userId && sug.created_by_id !== userId && !isInitialMock) {
+      return { success: false, error: 'Sadece öneriyi ekleyen kişi düzenleyebilir.' };
+    }
+
+    const updated: Suggestion = {
+      ...sug,
+      name: data.name !== undefined ? data.name.trim() : sug.name,
+      meaning: data.meaning !== undefined ? data.meaning.trim() : sug.meaning,
+      tagline: data.tagline !== undefined ? data.tagline.trim() : sug.tagline,
+      domain_status: data.domain_status !== undefined ? data.domain_status : sug.domain_status,
+      tags: Array.isArray(data.tags) ? data.tags : sug.tags,
+    };
+
+    if (isPostgresConfigured()) {
+      await ensurePgSchema();
+      await queryPg(
+        `UPDATE suggestions 
+         SET name = $1, meaning = $2, tagline = $3, domain_status = $4, tags = $5
+         WHERE id = $6`,
+        [
+          updated.name,
+          updated.meaning,
+          updated.tagline || '',
+          updated.domain_status || 'unknown',
+          JSON.stringify(updated.tags || []),
+          id,
+        ]
+      );
+      return { success: true, suggestion: updated };
+    }
+
+    const local = getLocalData();
+    const idx = local.suggestions.findIndex((s) => s.id === id);
+    if (idx !== -1) {
+      local.suggestions[idx] = updated;
+      saveLocalData(local);
+    }
+    return { success: true, suggestion: updated };
   },
 
   async createSuggestion(data: Omit<Suggestion, 'id' | 'created_at' | 'status'>): Promise<Suggestion> {
@@ -501,13 +577,23 @@ export const db = {
     return newSug;
   },
 
-  async deleteSuggestion(id: string): Promise<boolean> {
+  async deleteSuggestion(id: string, userId?: string): Promise<{ success: boolean; error?: string }> {
+    const sug = await this.getSuggestionById(id);
+    if (!sug) {
+      return { success: true };
+    }
+
+    const isInitialMock = ['sug_1', 'sug_2', 'sug_3'].includes(sug.id);
+    if (userId && sug.created_by_id !== userId && !isInitialMock) {
+      return { success: false, error: 'Sadece öneriyi ekleyen kişi silebilir.' };
+    }
+
     if (isPostgresConfigured()) {
       await ensurePgSchema();
       await queryPg('DELETE FROM suggestions WHERE id = $1', [id]);
       await queryPg('DELETE FROM votes WHERE suggestion_id = $1', [id]);
       await queryPg('DELETE FROM comments WHERE suggestion_id = $1', [id]);
-      return true;
+      return { success: true };
     }
 
     const local = getLocalData();
@@ -515,36 +601,34 @@ export const db = {
     local.votes = local.votes.filter((v) => v.suggestion_id !== id);
     local.comments = local.comments.filter((c) => c.suggestion_id !== id);
     saveLocalData(local);
-    return true;
+    return { success: true };
   },
 
   async getVotingSessions(): Promise<VotingSession[]> {
     if (isPostgresConfigured()) {
       await ensurePgSchema();
       const res = await queryPg('SELECT * FROM voting_sessions ORDER BY started_at DESC');
-      if (res.rows.length > 0) {
-        return res.rows.map((r: any) => {
-          let ids: string[] = [];
-          try {
-            ids = typeof r.included_suggestion_ids === 'string' ? JSON.parse(r.included_suggestion_ids) : r.included_suggestion_ids || [];
-          } catch {
-            ids = [];
-          }
-          return {
-            id: r.id,
-            title: r.title,
-            description: r.description || '',
-            created_by_id: r.created_by_id,
-            created_by_name: r.created_by_name,
-            status: r.status,
-            max_score: r.max_score || 10,
-            included_suggestion_ids: ids,
-            winner_suggestion_id: r.winner_suggestion_id || null,
-            started_at: new Date(r.started_at).toISOString(),
-            ended_at: r.ended_at ? new Date(r.ended_at).toISOString() : null,
-          };
-        });
-      }
+      return res.rows.map((r: any) => {
+        let ids: string[] = [];
+        try {
+          ids = typeof r.included_suggestion_ids === 'string' ? JSON.parse(r.included_suggestion_ids) : r.included_suggestion_ids || [];
+        } catch {
+          ids = [];
+        }
+        return {
+          id: r.id,
+          title: r.title,
+          description: r.description || '',
+          created_by_id: r.created_by_id,
+          created_by_name: r.created_by_name,
+          status: r.status,
+          max_score: r.max_score || 10,
+          included_suggestion_ids: ids,
+          winner_suggestion_id: r.winner_suggestion_id || null,
+          started_at: new Date(r.started_at).toISOString(),
+          ended_at: r.ended_at ? new Date(r.ended_at).toISOString() : null,
+        };
+      });
     }
 
     const local = getLocalData();
