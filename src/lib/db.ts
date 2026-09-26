@@ -78,20 +78,30 @@ const INITIAL_SUGGESTIONS: Suggestion[] = [
 ];
 
 const getConnectionString = () => {
-  return (
+  const explicit =
     process.env.STORAGE_URL ||
     process.env.DATABASE_URL ||
     process.env.POSTGRES_URL ||
     process.env.POSTGRES_PRISMA_URL ||
     process.env.POSTGRES_URL_NON_POOLING ||
     process.env.NEON_DATABASE_URL ||
-    ''
-  );
+    process.env.STORAGE_POSTGRES_URL;
+
+  if (explicit) return explicit;
+
+  // Auto-scan all env variables in case Vercel used a custom prefix
+  for (const [key, val] of Object.entries(process.env)) {
+    if (typeof val === 'string' && (val.startsWith('postgres://') || val.startsWith('postgresql://'))) {
+      return val;
+    }
+  }
+
+  return '';
 };
 
 const isPostgresConfigured = () => {
   const url = getConnectionString();
-  return Boolean(url && url.startsWith('postgres'));
+  return Boolean(url && (url.startsWith('postgres://') || url.startsWith('postgresql://')));
 };
 
 let pgPoolInstance: any = null;
@@ -303,10 +313,15 @@ export const db = {
       }
     }
 
+    const relevantKeys = Object.keys(process.env).filter(k =>
+      k.includes('POSTGRES') || k.includes('DATABASE') || k.includes('STORAGE') || k.includes('NEON')
+    );
+
     return {
       type: postgresConfigured ? 'postgres' : 'local',
       connected: postgresConfigured ? pgInitialized : true,
       connectionString: masked,
+      detectedKeys: relevantKeys,
       instructions: !postgresConfigured
         ? 'Vercel dağıtımında kalıcı veritabanı için Vercel Postgres / Neon / Supabase DATABASE_URL ortam değişkenini ekleyebilirsiniz.'
         : 'PostgreSQL bağlantısı aktif ve tablolar hazır.',
