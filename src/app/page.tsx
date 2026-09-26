@@ -23,6 +23,9 @@ import {
   ShieldCheck,
   ChevronRight,
   Pencil,
+  ExternalLink,
+  Eye,
+  AlertCircle,
 } from 'lucide-react';
 import { User, Suggestion, VotingSession, LeaderboardItem, Comment } from '@/lib/types';
 
@@ -59,6 +62,7 @@ export default function HomePage() {
   const [showVoteModal, setShowVoteModal] = useState(false);
   const [showCommentsModal, setShowCommentsModal] = useState<Suggestion | null>(null);
   const [showDbGuideModal, setShowDbGuideModal] = useState(false);
+  const [selectedSugDetail, setSelectedSugDetail] = useState<Suggestion | null>(null);
 
   // Form State: Add Suggestion
   const [newSugName, setNewSugName] = useState('');
@@ -281,6 +285,34 @@ export default function HomePage() {
       alert('Bir hata meydana geldi.');
     } finally {
       setSubmittingSug(false);
+    }
+  };
+
+  // Helper to format clean domain from Turkish characters
+  const getCleanDomain = (name: string) => {
+    return name
+      .toLowerCase()
+      .trim()
+      .replace(/ğ/g, 'g')
+      .replace(/ü/g, 'u')
+      .replace(/ş/g, 's')
+      .replace(/ı/g, 'i')
+      .replace(/ö/g, 'o')
+      .replace(/ç/g, 'c')
+      .replace(/[^a-z0-9]/g, '');
+  };
+
+  // Open Full Detail Modal for a suggestion
+  const openDetailModal = async (sug: Suggestion) => {
+    setSelectedSugDetail(sug);
+    try {
+      const res = await fetch(`/api/comments?suggestion_id=${sug.id}`);
+      const data = await res.json();
+      if (data.success) {
+        setCommentsList(data.comments);
+      }
+    } catch (e) {
+      console.error('Failed to load comments for suggestion:', e);
     }
   };
 
@@ -922,7 +954,12 @@ export default function HomePage() {
             ) : (
               <div className="cards-grid">
                 {filteredSuggestions.map((sug) => (
-                  <div key={sug.id} className="clean-card" id={`card-${sug.id}`}>
+                  <div
+                    key={sug.id}
+                    className="clean-card clickable"
+                    id={`card-${sug.id}`}
+                    onClick={() => openDetailModal(sug)}
+                  >
                     <div>
                       <div className="card-header-row">
                         <div>
@@ -932,14 +969,22 @@ export default function HomePage() {
 
                         <span
                           className={`status-badge ${
-                            sug.domain_status === 'available' ? 'status-available' : ''
+                            sug.domain_status === 'available'
+                              ? 'status-available'
+                              : sug.domain_status === 'taken'
+                              ? 'status-taken'
+                              : 'status-unknown'
                           }`}
                         >
-                          {sug.domain_status === 'available' ? '.com Müsait' : 'Alan Adı'}
+                          {sug.domain_status === 'available'
+                            ? '.com Müsait'
+                            : sug.domain_status === 'taken'
+                            ? '.com Dolu'
+                            : '.com Bilinmiyor'}
                         </span>
                       </div>
 
-                      {/* Meaning description */}
+                      {/* Meaning description preview */}
                       <div className="meaning-block" style={{ marginTop: '0.85rem' }}>
                         <div className="meaning-title">Ne Anlama Geliyor?</div>
                         <p className="meaning-desc">{sug.meaning}</p>
@@ -954,6 +999,11 @@ export default function HomePage() {
                           ))}
                         </div>
                       )}
+
+                      <div className="clean-card-hint">
+                        <Eye size={12} />
+                        <span>Detaylar ve alan adı için karta tıklayın</span>
+                      </div>
                     </div>
 
                     <div className="card-meta-bar">
@@ -968,7 +1018,10 @@ export default function HomePage() {
 
                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                         <button
-                          onClick={() => openComments(sug)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openComments(sug);
+                          }}
                           className="btn btn-outline btn-sm"
                           style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}
                         >
@@ -980,7 +1033,10 @@ export default function HomePage() {
                         {authenticatedUser && (authenticatedUser.id === sug.created_by_id || ['sug_1', 'sug_2', 'sug_3'].includes(sug.id)) && (
                           <>
                             <button
-                              onClick={() => openEditSuggestion(sug)}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openEditSuggestion(sug);
+                              }}
                               className="btn btn-outline btn-sm"
                               style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}
                               title="Öneriyi Düzenle"
@@ -990,7 +1046,10 @@ export default function HomePage() {
                             </button>
 
                             <button
-                              onClick={() => handleDeleteSuggestion(sug.id, sug.name)}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteSuggestion(sug.id, sug.name);
+                              }}
                               className="btn btn-danger btn-sm"
                               style={{ padding: '0.25rem 0.5rem' }}
                               title="Öneriyi Sil"
@@ -1451,6 +1510,304 @@ export default function HomePage() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: SUGGESTION FULL DETAIL & DOMAIN CARD */}
+      {selectedSugDetail && (
+        <div
+          className="modal-backdrop"
+          id="detail-modal"
+          onClick={() => setSelectedSugDetail(null)}
+        >
+          <div className="detail-modal-box" onClick={(e) => e.stopPropagation()}>
+            {/* Header */}
+            <div className="detail-header">
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.35rem' }}>
+                  <span className="status-badge" style={{ fontSize: '0.65rem', background: 'rgba(255,255,255,0.08)' }}>
+                    İSİM VE MARKA DETAY KARTI
+                  </span>
+                </div>
+                <h2 className="detail-brand-name">{selectedSugDetail.name}</h2>
+                {selectedSugDetail.tagline && (
+                  <p className="detail-tagline">&ldquo;{selectedSugDetail.tagline}&rdquo;</p>
+                )}
+              </div>
+              <button
+                onClick={() => setSelectedSugDetail(null)}
+                className="btn btn-outline btn-sm"
+                style={{ padding: '0.35rem 0.5rem' }}
+              >
+                <X size={15} />
+              </button>
+            </div>
+
+            {/* DOMAIN & WEB PRESENCE CARD */}
+            {(() => {
+              const clean = getCleanDomain(selectedSugDetail.name);
+              const domainName = `${clean}.com`;
+              const status = selectedSugDetail.domain_status;
+
+              return (
+                <div className="detail-domain-card">
+                  <div className="domain-card-main">
+                    <div className="domain-name-display">
+                      <Globe size={18} color="#60A5FA" />
+                      <span>{domainName}</span>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <span
+                        className={`status-badge ${
+                          status === 'available'
+                            ? 'status-available'
+                            : status === 'taken'
+                            ? 'status-taken'
+                            : 'status-unknown'
+                        }`}
+                        style={{ fontSize: '0.78rem', padding: '0.3rem 0.75rem' }}
+                      >
+                        {status === 'available' && '✓ .com Müsait / Alınabilir'}
+                        {status === 'taken' && '✕ .com Dolu / Başkası Almış'}
+                        {status === 'unknown' && '? .com Henüz Kontrol Edilmedi'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Domain Quick Action Links */}
+                  <div className="domain-quick-actions">
+                    <a
+                      href={`https://who.is/whois/${domainName}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="domain-chip-btn"
+                      title="Whois sorgusu ile alan adı sahiplik ve tescil durumunu inceleyin"
+                    >
+                      <ExternalLink size={12} />
+                      <span>Who.is ile Sorgula</span>
+                    </a>
+
+                    <a
+                      href={`https://www.google.com/search?q=${encodeURIComponent(
+                        selectedSugDetail.name + ' marka patent'
+                      )}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="domain-chip-btn"
+                      title="Google'da benzer marka veya şirketleri araştırın"
+                    >
+                      <Search size={12} />
+                      <span>Markayı Google'da Ara</span>
+                    </a>
+                  </div>
+
+                  {/* Alternative Extensions */}
+                  <div className="domain-extensions-row">
+                    <span style={{ fontWeight: 600 }}>Alternatifler:</span>
+                    {['.com.tr', '.net', '.co', '.io'].map((ext) => (
+                      <a
+                        key={ext}
+                        href={`https://who.is/whois/${clean}${ext}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="domain-ext-pill"
+                        title={`${clean}${ext} sorgula`}
+                      >
+                        {clean}{ext} ↗
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* FULL MEANING & CONCEPT */}
+            <div className="detail-meaning-card">
+              <div className="detail-section-title">Ne Anlama Geliyor? / Konsept Açıklaması</div>
+              <p className="detail-meaning-text">{selectedSugDetail.meaning}</p>
+            </div>
+
+            {/* TAGS */}
+            {selectedSugDetail.tags && selectedSugDetail.tags.length > 0 && (
+              <div style={{ marginTop: '1rem' }}>
+                <div className="detail-section-title">Etiketler & Odak Alanları</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem', marginTop: '0.35rem' }}>
+                  {selectedSugDetail.tags.map((t) => (
+                    <span key={t} className="clean-tag" style={{ fontSize: '0.78rem', padding: '0.2rem 0.6rem' }}>
+                      #{t}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* META INFO GRID */}
+            <div className="detail-meta-grid">
+              <div className="detail-meta-item">
+                <div className="detail-meta-label">Öneren Ortak</div>
+                <div className="detail-meta-val">
+                  <UserIcon size={14} color="var(--text-dim)" />
+                  <span>{selectedSugDetail.created_by_name}</span>
+                </div>
+              </div>
+
+              <div className="detail-meta-item">
+                <div className="detail-meta-label">Eklenme Tarihi</div>
+                <div className="detail-meta-val">
+                  <Clock size={14} color="var(--text-dim)" />
+                  <span>
+                    {new Date(selectedSugDetail.created_at).toLocaleDateString('tr-TR', {
+                      day: 'numeric',
+                      month: 'long',
+                      year: 'numeric',
+                    })}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* QUICK COMMENTS & DISCUSSION IN DETAIL MODAL */}
+            <div style={{ marginTop: '1.25rem', paddingTop: '1.25rem', borderTop: '1px solid var(--border-subtle)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.65rem' }}>
+                <div className="detail-section-title" style={{ marginBottom: 0 }}>
+                  Ortakların Yorumları ({commentsList.length})
+                </div>
+              </div>
+
+              <div style={{ maxHeight: '180px', overflowY: 'auto', marginBottom: '0.75rem' }}>
+                {commentsList.length === 0 ? (
+                  <p style={{ color: 'var(--text-dim)', fontSize: '0.8rem', fontStyle: 'italic', padding: '0.5rem 0' }}>
+                    Bu isim hakkında henüz görüş bildirilmedi.
+                  </p>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                    {commentsList.map((c) => (
+                      <div
+                        key={c.id}
+                        style={{
+                          background: 'var(--bg-input)',
+                          border: '1px solid var(--border-subtle)',
+                          borderRadius: 'var(--radius-xs)',
+                          padding: '0.6rem 0.8rem',
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', marginBottom: '0.2rem' }}>
+                          <span style={{ fontWeight: 600, color: '#FFFFFF' }}>{c.user_name}</span>
+                          <span style={{ color: 'var(--text-dim)', fontSize: '0.7rem' }}>
+                            {new Date(c.created_at).toLocaleDateString('tr-TR')}
+                          </span>
+                        </div>
+                        <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', margin: 0 }}>{c.text}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Add Comment Input */}
+              <form
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  if (!newCommentText.trim() || !authenticatedUser) return;
+                  try {
+                    setSubmittingComment(true);
+                    const res = await fetch('/api/comments', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        suggestion_id: selectedSugDetail.id,
+                        user_id: authenticatedUser.id,
+                        user_name: authenticatedUser.name,
+                        text: newCommentText.trim(),
+                      }),
+                    });
+                    const data = await res.json();
+                    if (data.success && data.comment) {
+                      setCommentsList([...commentsList, data.comment]);
+                      setNewCommentText('');
+                    }
+                  } catch (err) {
+                    console.error(err);
+                  } finally {
+                    setSubmittingComment(false);
+                  }
+                }}
+                style={{ display: 'flex', gap: '0.5rem' }}
+              >
+                <input
+                  type="text"
+                  placeholder="Bu isim hakkında fikrinizi yazın..."
+                  value={newCommentText}
+                  onChange={(e) => setNewCommentText(e.target.value)}
+                  className="field-input"
+                  style={{ flex: 1, padding: '0.5rem 0.75rem', fontSize: '0.82rem' }}
+                />
+                <button
+                  type="submit"
+                  disabled={submittingComment || !newCommentText.trim()}
+                  className="btn btn-primary btn-sm"
+                  style={{ whiteSpace: 'nowrap' }}
+                >
+                  {submittingComment ? 'Gönderiliyor...' : 'Yorum Yap'}
+                </button>
+              </form>
+            </div>
+
+            {/* MODAL FOOTER ACTIONS */}
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                gap: '0.5rem',
+                marginTop: '1.5rem',
+                paddingTop: '1rem',
+                borderTop: '1px solid var(--border-subtle)',
+              }}
+            >
+              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                {authenticatedUser &&
+                  (authenticatedUser.id === selectedSugDetail.created_by_id ||
+                    ['sug_1', 'sug_2', 'sug_3'].includes(selectedSugDetail.id)) && (
+                    <>
+                      <button
+                        onClick={() => {
+                          const target = selectedSugDetail;
+                          setSelectedSugDetail(null);
+                          openEditSuggestion(target);
+                        }}
+                        className="btn btn-outline btn-sm"
+                      >
+                        <Pencil size={13} />
+                        <span>Düzenle</span>
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          const target = selectedSugDetail;
+                          setSelectedSugDetail(null);
+                          handleDeleteSuggestion(target.id, target.name);
+                        }}
+                        className="btn btn-danger btn-sm"
+                      >
+                        <Trash2 size={13} />
+                        <span>Sil</span>
+                      </button>
+                    </>
+                  )}
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setSelectedSugDetail(null)}
+                className="btn btn-outline btn-sm"
+                style={{ minWidth: '80px' }}
+              >
+                Kapat
+              </button>
+            </div>
           </div>
         </div>
       )}
